@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -266,6 +267,7 @@
 
   <!-- ================= INICIO ================= -->
   <section id="v-inicio">
+    <div id="bannerPrep" style="margin-top:16px"></div>
     <div style="margin:16px 0">
       <button class="btn btn-verde" onclick="ver('cargar')">＋ Nuevo chequeo</button>
     </div>
@@ -293,9 +295,16 @@
       <div id="resumenFiltro"></div>
     </div>
 
-    <div class="btn-fila" style="margin-bottom:40px">
+    <div class="btn-fila">
       <button class="btn btn-borde" onclick="ver('inicio')">Cancelar</button>
       <button class="btn btn-verde" id="btnCrear" onclick="crearSesion()" disabled>Empezar chequeo</button>
+    </div>
+    <div style="margin:10px 0 40px">
+      <button class="btn btn-borde" id="btnPreparar" onclick="prepararParaTablet()" disabled>📤 Enviar a la tablet</button>
+      <div style="font-size:.85rem;color:var(--muted);margin-top:8px;text-align:center">
+        Deja la lista lista para que el encargado la descargue en la tablet.
+      </div>
+      <div id="prepMsg" style="margin-top:10px"></div>
     </div>
   </section>
 
@@ -536,7 +545,7 @@ function ver(v, sinPila){
   else if (v === 'sesion'){ t.textContent = 'Chequeo guardado'; s.textContent = ''; }
 
   window.scrollTo(0,0);
-  if (v === 'inicio') pintarSesiones();
+  if (v === 'inicio'){ pintarSesiones(); revisarPreparados(); }
   if (v === 'ajustes') pintarAjustes();
   if (v === 'agregar') prepararAgregar();
 }
@@ -703,15 +712,25 @@ function aplicarFiltro(){
   }
   res.innerHTML = html;
   document.getElementById('btnCrear').disabled = sel.length === 0;
+  document.getElementById('btnPreparar').disabled = sel.length === 0;
 }
 
 /* =========================================================
    6. Crear la sesión de campo
    ========================================================= */
-function crearSesion(){
-  if (!borrador || !borrador.sel || !borrador.sel.length) return;
-  const ahora = new Date();
-  const animales = borrador.sel.map((s, i) => {
+// orden descendente por estado, y dentro de cada estado por número
+function ordenar(animales){
+  animales.sort((a,b) => {
+    const ea = norm(a.estado), eb = norm(b.estado);
+    if (ea !== eb) return eb.localeCompare(ea, 'es');
+    const na = numero(a.num), nb = numero(b.num);
+    if (na !== null && nb !== null) return na - nb;
+    return String(a.num).localeCompare(String(b.num), 'es');
+  });
+  return animales;
+}
+function animalesDelBorrador(){
+  return ordenar(borrador.sel.map((s, i) => {
     const datos = {};
     borrador.heads.forEach((h, j) => { if (h) datos[h] = muestra(s.fila[j]); });
     return {
@@ -727,15 +746,13 @@ function crearSesion(){
       agregado: false,
       hora: null
     };
-  });
-  // orden descendente por estado, y dentro de cada estado por número
-  animales.sort((a,b) => {
-    const ea = norm(a.estado), eb = norm(b.estado);
-    if (ea !== eb) return eb.localeCompare(ea, 'es');
-    const na = numero(a.num), nb = numero(b.num);
-    if (na !== null && nb !== null) return na - nb;
-    return String(a.num).localeCompare(String(b.num), 'es');
-  });
+  }));
+}
+
+function crearSesion(){
+  if (!borrador || !borrador.sel || !borrador.sel.length) return;
+  const ahora = new Date();
+  const animales = animalesDelBorrador();
 
   sesion = {
     id: 'ses_' + ahora.getTime(),
@@ -936,6 +953,135 @@ function agregarAnimal(){
 }
 
 /* =========================================================
+   7b. Preparar en el computador / recoger en la tablet
+   ========================================================= */
+function pedir(cuerpo){
+  if (!config.urlSheet) return Promise.reject(new Error('sin-url'));
+  return fetch(config.urlSheet, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(cuerpo)
+  }).then(r => {
+    if (!r.ok) throw new Error('http-' + r.status);
+    return r.text();
+  }).then(t => {
+    let j;
+    try { j = JSON.parse(t); } catch(e){ throw new Error('respuesta-rara'); }
+    if (!j.ok) throw new Error(j.error || 'error');
+    return j;
+  });
+}
+
+function prepararParaTablet(){
+  const msg = document.getElementById('prepMsg');
+  if (!borrador || !borrador.sel || !borrador.sel.length) return;
+  if (!config.urlSheet){
+    msg.innerHTML = '<div class="aviso malo"><b>Falta la hoja de Google</b>Configúrala en el engranaje ⚙ para poder mandar la lista a la tablet.</div>';
+    return;
+  }
+  if (!navigator.onLine){
+    msg.innerHTML = '<div class="aviso malo"><b>No hay internet</b>Esta parte sí necesita conexión, porque la lista viaja por la hoja de Google.</div>';
+    return;
+  }
+  const btn = document.getElementById('btnPreparar');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  msg.innerHTML = '<div class="aviso">Enviando la lista…</div>';
+
+  const ahora = new Date();
+  const animales = animalesDelBorrador();
+  const cuerpo = {
+    accion: 'preparar',
+    sesionId: 'prep_' + ahora.getTime(),
+    fecha: ahora.toISOString(),
+    archivo: borrador.archivo || '',
+    meta: {
+      heads: borrador.heads.filter(Boolean),
+      colId: borrador.heads[borrador.iId] || '',
+      colStatus: borrador.heads[borrador.iStatus] || '',
+      colDel: borrador.heads[borrador.iDel] || '',
+      colDus: borrador.heads[borrador.iDus] || ''
+    },
+    animales: animales.map(a => ([
+      a.num, a.estado, a.del, a.dus, a.motivos.join(', '), JSON.stringify(a.datos)
+    ]))
+  };
+
+  pedir(cuerpo).then(() => {
+    msg.innerHTML = '<div class="aviso bien"><b>Lista enviada</b>' + animales.length +
+      ' animales. En la tablet, con internet, aparece arriba el aviso para descargarla.</div>';
+  }).catch(e => {
+    console.error(e);
+    msg.innerHTML = '<div class="aviso malo"><b>No se pudo enviar</b>Revisa la conexión con la hoja en el engranaje ⚙.</div>';
+  }).then(() => {
+    btn.disabled = false; btn.textContent = '📤 Enviar a la tablet';
+  });
+}
+
+let preparados = [];
+function revisarPreparados(){
+  const cont = document.getElementById('bannerPrep');
+  if (!config.urlSheet || !navigator.onLine){ cont.innerHTML = ''; return; }
+  pedir({accion:'pendientes'}).then(j => {
+    preparados = j.pendientes || [];
+    if (!preparados.length){ cont.innerHTML = ''; return; }
+    cont.innerHTML = preparados.map(p =>
+      '<div class="aviso bien" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+        '<div style="flex:1;min-width:180px"><b>Chequeo preparado</b>' +
+        esc(fechaCorta(p.fecha)) + ' · ' + p.animales + ' animales</div>' +
+        '<button class="btn btn-verde" style="width:auto" onclick="descargarPreparado(\'' + esc(p.sesionId) + '\')">Descargar</button>' +
+      '</div>').join('');
+  }).catch(e => { cont.innerHTML = ''; });
+}
+
+function descargarPreparado(id){
+  const cont = document.getElementById('bannerPrep');
+  cont.innerHTML = '<div class="aviso">Descargando la lista…</div>';
+  pedir({accion:'traer', sesionId:id}).then(j => {
+    const meta = j.meta || {};
+    const animales = ordenar((j.animales || []).map((f, i) => {
+      let datos = {};
+      try { datos = JSON.parse(f[5] || '{}'); } catch(e){ datos = {}; }
+      return {
+        id: 'p' + i + '_' + Math.random().toString(36).slice(2,7),
+        num: String(f[0] === null || f[0] === undefined ? '' : f[0]),
+        estado: String(f[1] || ''),
+        del: String(f[2] === null || f[2] === undefined ? '' : f[2]),
+        dus: String(f[3] === null || f[3] === undefined ? '' : f[3]),
+        motivos: String(f[4] || '').split(',').map(s => s.trim()).filter(Boolean),
+        datos, resultado:null, comentario:'', agregado:false, hora:null
+      };
+    }));
+    if (!animales.length) throw new Error('vacio');
+
+    sesion = {
+      id: 'ses_' + Date.now(),
+      creado: j.fecha || new Date().toISOString(),
+      nombre: 'Chequeo ' + fechaCorta(j.fecha || new Date().toISOString()),
+      archivo: j.archivo || '',
+      heads: meta.heads || [],
+      colId: meta.colId || '', colStatus: meta.colStatus || '',
+      colDel: meta.colDel || '', colDus: meta.colDus || '',
+      operario: config.operario || '',
+      preparadoId: id,
+      animales,
+      enviado:false, enviadoEn:null
+    };
+    return guardarSesion().then(() => {
+      pedir({accion:'recogido', sesionId:id}).catch(()=>{});
+      preparados = preparados.filter(p => p.sesionId !== id);
+      filtro = 'todas'; setFiltro('todas');
+      document.getElementById('buscar').value = '';
+      ver('campo');
+      pintarLista();
+      toast(animales.length + ' animales listos para chequear');
+    });
+  }).catch(e => {
+    console.error(e);
+    cont.innerHTML = '<div class="aviso malo"><b>No se pudo descargar</b>Revisa el internet e inténtalo otra vez.</div>';
+  });
+}
+
+/* =========================================================
    8. Historial
    ========================================================= */
 function pintarSesiones(){
@@ -1121,6 +1267,7 @@ function guardarUrl(){
   dbGuardar('config', {clave:'urlSheet', valor:u}).then(() => {
     document.getElementById('ajustesMsg').innerHTML = '<div class="aviso bien">Dirección guardada.</div>';
     sincronizarPendientes(false);
+    revisarPreparados();
   });
 }
 function guardarOperario(){
@@ -1149,7 +1296,7 @@ function pintarRed(){
   if (navigator.onLine){ el.classList.remove('off'); t.textContent = 'Con internet'; }
   else { el.classList.add('off'); t.textContent = 'Sin internet · todo se guarda en la tablet'; }
 }
-window.addEventListener('online', () => { pintarRed(); sincronizarPendientes(false); });
+window.addEventListener('online', () => { pintarRed(); sincronizarPendientes(false); if (vista === 'inicio') revisarPreparados(); });
 window.addEventListener('offline', pintarRed);
 
 window.addEventListener('beforeunload', () => { if (sesion) { try { dbGuardar('sesiones', sesion); } catch(e){} } });
@@ -1164,6 +1311,7 @@ function iniciar(){
       config.operario = o ? o.valor : '';
       ver('inicio', true);
       sincronizarPendientes(false);
+      revisarPreparados();
     })
     .catch(err => {
       console.error(err);
