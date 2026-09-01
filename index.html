@@ -397,6 +397,12 @@
       </div>
     </div>
 
+    <div class="card">
+      <h3>Chequeos guardados</h3>
+      <div class="card-sub" style="margin-bottom:6px">Borra un chequeo si se cargó por error. Si ya se había enviado, sus filas también se mueven a la papelera de la hoja de Google.</div>
+      <div id="listaBorrar"></div>
+    </div>
+
     <div style="margin-bottom:40px">
       <button class="btn btn-borde" onclick="ver('inicio')">Volver</button>
     </div>
@@ -1279,12 +1285,75 @@ function pintarAjustes(){
   const pend = sesiones.filter(s => !s.enviado && s.animales.some(a => a.resultado)).length;
   let txt = sesiones.length + ' chequeos guardados en la tablet · ' + pend + ' sin enviar.';
   info.textContent = txt;
+  pintarBorrado();
   if (navigator.storage && navigator.storage.persisted){
     navigator.storage.persisted().then(p => {
       info.textContent = txt + (p ? ' Almacenamiento protegido.' : ' Almacenamiento normal.');
     });
   }
 }
+
+/* ---- borrar un chequeo (tablet + hoja de Google) ---- */
+function pintarBorrado(){
+  const cont = document.getElementById('listaBorrar');
+  if (!cont) return;
+  if (!sesiones.length){
+    cont.innerHTML = '<div class="card-sub">No hay chequeos guardados.</div>';
+    return;
+  }
+  cont.innerHTML = sesiones.map(s => {
+    const estado = s.enviado ? 'Enviado' : (s.animales.some(a => a.resultado) ? 'Sin enviar' : 'Sin empezar');
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dotted #e6ebe3">' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-weight:700">' + esc(fechaCorta(s.creado)) + '</div>' +
+        '<div style="font-size:.82rem;color:var(--muted)">' + s.animales.length + ' animales · ' + estado + '</div>' +
+      '</div>' +
+      '<button class="btn btn-texto" style="width:auto;padding:0 14px" onclick="borrarSesion(\'' + s.id + '\')">Borrar</button>' +
+    '</div>';
+  }).join('');
+}
+
+function quitarSesionLocal_(id){
+  return dbBorrar('sesiones', id).then(() => cargarSesiones()).then(() => {
+    if (sesion && sesion.id === id) sesion = null;
+    pintarBorrado();
+    if (vista === 'inicio') pintarSesiones();
+  });
+}
+
+function borrarSesion(id){
+  const s = sesiones.find(x => x.id === id);
+  if (!s) return;
+
+  // nunca se envió: no hay nada que mover en la hoja, se borra solo de la tablet
+  if (!s.enviado){
+    if (!confirm('Este chequeo nunca se envió a la hoja de Google. Se va a borrar solo de la tablet. ¿Continuar?')) return;
+    quitarSesionLocal_(id).then(() => toast('Chequeo borrado'));
+    return;
+  }
+
+  const n = s.animales.length;
+  const texto = 'Se van a mover ' + n + (n === 1 ? ' fila' : ' filas') +
+    ' a la papelera de la hoja de Google, y el chequeo se va a borrar de la tablet. ¿Continuar?';
+  if (!confirm(texto)) return;
+
+  // sin internet no se puede tocar la hoja: no se borra nada, ni de la tablet
+  if (!navigator.onLine){
+    toast('Necesitas conexión a internet para borrar también de la hoja de Google. No se borró nada.');
+    return;
+  }
+
+  pedir({accion:'borrar', sesionId:s.id}).then(j => {
+    return quitarSesionLocal_(id).then(() => {
+      const mov = j.movidas || 0;
+      toast(mov + (mov === 1 ? ' fila movida a la papelera. Chequeo borrado.' : ' filas movidas a la papelera. Chequeo borrado.'));
+    });
+  }).catch(e => {
+    console.error(e);
+    toast('No se pudo borrar de la hoja de Google. No se borró nada.');
+  });
+}
+
 function guardarUrl(){
   const u = document.getElementById('urlSheet').value.trim();
   config.urlSheet = u;

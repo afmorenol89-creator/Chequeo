@@ -7,10 +7,11 @@
  *   Resumen           → una fila por chequeo, con los totales.
  *   Preparados        → listas enviadas desde el computador, esperando que la tablet las recoja.
  *   Preparados_Index  → control de esas listas.
+ *   Papelera          → filas de "Chequeos" que se borraron desde la app (no se eliminan,
+ *                       quedan aquí con la fecha de borrado, por si hay que recuperarlas).
  *
- * VERSIÓN 3 — agrega el resultado ABORTO (además de PREÑADA/VACIA) y su
- * conteo en la pestaña Resumen (columna ABORTOS, al final para no correr
- * las columnas de las filas históricas ya guardadas).
+ * VERSIÓN 4 — agrega la acción 'borrar': mueve las filas de un chequeo de
+ * "Chequeos" a "Papelera" (sin eliminarlas) y quita su fila de "Resumen".
  * Si ya tenías una versión anterior, después de pegar esto hay que hacer
  * Implementar → Administrar implementaciones → lápiz → Versión nueva → Implementar.
  */
@@ -25,6 +26,7 @@ function doPost(e) {
     if (datos.accion === 'pendientes') return pendientes_(libro);
     if (datos.accion === 'traer')      return traer_(libro, datos);
     if (datos.accion === 'recogido')   return recogido_(libro, datos);
+    if (datos.accion === 'borrar')     return borrar_(libro, datos);
     return guardarChequeo_(libro, datos);
 
   } catch (err) {
@@ -85,6 +87,55 @@ function guardarChequeo_(libro, datos) {
   ]);
 
   return salida_({ok: true, filas: datos.filas.length});
+}
+
+/* ---------------------------------------------------------
+   Borrar un chequeo (lo pide la app desde Ajustes)
+   Mueve sus filas de "Chequeos" a "Papelera" (no las borra) y
+   quita su fila de "Resumen". Devuelve cuántas filas movió.
+   --------------------------------------------------------- */
+function borrar_(libro, datos) {
+  var hoja = libro.getSheetByName('Chequeos');
+  if (!hoja || hoja.getLastRow() < 2) {
+    quitarDeResumen_(libro, datos.sesionId);
+    return salida_({ok: true, movidas: 0});
+  }
+
+  var ancho = hoja.getLastColumn();
+  var encabezados = hoja.getRange(1, 1, 1, ancho).getValues()[0];
+  var colSesion = encabezados.indexOf('SESION') + 1;
+  if (colSesion <= 0) return salida_({ok: false, error: 'la pestaña Chequeos no tiene columna SESION'});
+
+  var vals = hoja.getRange(2, 1, hoja.getLastRow() - 1, ancho).getValues();
+  var filas = [];
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][colSesion - 1]) === String(datos.sesionId)) filas.push(vals[i]);
+  }
+
+  if (filas.length) {
+    var papelera = hoja_(libro, 'Papelera', encabezados.concat(['BORRADO EL']));
+    var ahora = new Date();
+    var filasPapelera = filas.map(function (f) { return f.concat([ahora]); });
+    papelera.getRange(papelera.getLastRow() + 1, 1, filasPapelera.length, filasPapelera[0].length)
+      .setValues(filasPapelera);
+
+    // de abajo hacia arriba, para no desordenar los índices al borrar
+    for (var j = vals.length - 1; j >= 0; j--) {
+      if (String(vals[j][colSesion - 1]) === String(datos.sesionId)) hoja.deleteRow(j + 2);
+    }
+  }
+
+  quitarDeResumen_(libro, datos.sesionId);
+  return salida_({ok: true, movidas: filas.length});
+}
+
+function quitarDeResumen_(libro, sesionId) {
+  var res = libro.getSheetByName('Resumen');
+  if (!res || res.getLastRow() < 2) return;
+  var vr = res.getRange(2, 2, res.getLastRow() - 1, 1).getValues();
+  for (var j = vr.length - 1; j >= 0; j--) {
+    if (String(vr[j][0]) === String(sesionId)) res.deleteRow(j + 2);
+  }
 }
 
 /* ---------------------------------------------------------
