@@ -1,5 +1,5 @@
 /* Service worker: guarda la aplicación en la tablet para que abra sin internet. */
-const CACHE = 'chequeo-v4';
+const CACHE = 'chequeo-v5';
 const ARCHIVOS = [
   './',
   './index.html',

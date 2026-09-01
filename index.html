@@ -118,6 +118,7 @@
   }
   .a-btn[aria-pressed="true"] .mk{opacity:1}
   .a-btn:active{transform:scale(.985)}
+  .a-btn:disabled{opacity:.55;pointer-events:none}
   .a-extra{margin-top:10px;display:flex;gap:10px;align-items:stretch}
   .a-nota{
     flex:1;min-height:48px;padding:11px 12px;border:1px solid var(--line);
@@ -126,6 +127,7 @@
   .a-nota::placeholder{color:#93a094}
   .a-nota:focus{outline:none;border-color:var(--azul);box-shadow:0 0 0 3px #20618f22}
   .a-nota.tiene{border-color:#c9d6cb;background:#fbfcfa}
+  .a-nota[readonly]{background:var(--panel);color:var(--muted)}
   .ver-mas{
     background:none;color:var(--muted);font-size:0.85rem;padding:8px 2px;
     text-decoration:underline;text-underline-offset:3px;
@@ -154,6 +156,8 @@
   .btn-borde{background:var(--paper);border:2px solid var(--line);color:var(--ink)}
   .btn-borde:active{background:var(--panel)}
   .btn-texto{background:none;color:var(--alerta);font-weight:600;min-height:48px}
+  .btn-ambar{background:var(--ambar);color:#fff}
+  .btn-ambar:active{background:#9c4b08}
   .btn:disabled{opacity:.45}
   .btn-fila{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   @media (max-width:520px){.btn-fila{grid-template-columns:1fr}}
@@ -227,6 +231,16 @@
   }
   .fchip[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
 
+  /* ---------- tabla de detalle de un chequeo (solo lectura) ---------- */
+  .tabla-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
+  .tabla-datos{width:100%;border-collapse:collapse;font-size:0.86rem;white-space:nowrap}
+  .tabla-datos th,.tabla-datos td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
+  .tabla-datos th{background:var(--panel);font-weight:700;position:sticky;top:0}
+  .tabla-datos tr:last-child td{border-bottom:none}
+  .totales{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px;margin-top:14px;text-align:center}
+  .totales b{display:block;font-size:1.3rem;font-weight:800}
+  .totales span{font-size:0.76rem;color:var(--muted)}
+
   /* ---------- barra inferior ---------- */
   .barra{
     position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--paper);
@@ -267,6 +281,7 @@
 
 <div class="prog-wrap oculto" id="progWrap">
   <div class="prog-in">
+    <div class="aviso oculto" id="cerradoAviso" style="margin-bottom:10px"></div>
     <div class="prog-head">
       <div class="prog-count"><span id="progHecho">0</span><small> de <span id="progTotal">0</span> revisadas</small></div>
       <div style="font-size:.85rem;color:var(--muted)" id="progDetalle"></div>
@@ -335,7 +350,7 @@
     </div>
     <div class="lista" id="lista"></div>
     <div style="margin:18px 0 10px">
-      <button class="btn btn-borde" onclick="ver('agregar')">＋ Agregar animal que no está en la lista</button>
+      <button class="btn btn-borde" id="btnAgregarAnimal" onclick="ver('agregar')">＋ Agregar animal que no está en la lista</button>
     </div>
   </section>
 
@@ -399,8 +414,8 @@
 
     <div class="card">
       <h3>Chequeos guardados</h3>
-      <div class="card-sub" style="margin-bottom:6px">Borra un chequeo si se cargó por error. Si ya se había enviado, sus filas también se mueven a la papelera de la hoja de Google.</div>
-      <div id="listaBorrar"></div>
+      <div class="card-sub" style="margin-bottom:6px">Toca uno para ver el detalle, exportarlo o borrarlo.</div>
+      <div id="listaChequeos"></div>
     </div>
 
     <div style="margin-bottom:40px">
@@ -564,7 +579,7 @@ function ver(v, sinPila){
   const t = document.getElementById('titulo'), s = document.getElementById('subtitulo');
   if (v === 'inicio'){ t.textContent = 'Chequeo reproductivo'; s.textContent = 'La Morelia'; }
   else if (v === 'cargar'){ t.textContent = 'Nuevo chequeo'; s.textContent = 'Cargar y filtrar'; }
-  else if (v === 'campo'){ t.textContent = sesion ? sesion.nombre : 'Chequeo'; s.textContent = 'Toca preñada o vacía en cada animal'; }
+  else if (v === 'campo'){ t.textContent = sesion ? sesion.nombre : 'Chequeo'; s.textContent = (sesion && sesion.enviado) ? 'Chequeo cerrado · solo lectura' : 'Toca preñada o vacía en cada animal'; }
   else if (v === 'agregar'){ t.textContent = 'Agregar animal'; s.textContent = ''; }
   else if (v === 'ajustes'){ t.textContent = 'Ajustes'; s.textContent = ''; }
   else if (v === 'sesion'){ t.textContent = 'Chequeo guardado'; s.textContent = ''; }
@@ -846,11 +861,21 @@ function animalesVisibles(){
     return true;
   });
 }
+// Un chequeo cerrado (ya enviado a la hoja de Google) es de solo lectura,
+// para no modificarlo por accidente. Se reabre con el botón de la barra.
+function botonResultado(a, valor, clase, icono, etiqueta, cerrado){
+  const activo = a.resultado === valor;
+  const accion = cerrado ? ' disabled' : ' onclick="marcar(\'' + a.id + '\',\'' + valor + '\')"';
+  return '<button class="a-btn ' + clase + '" aria-pressed="' + activo + '"' + accion + '>' +
+    '<span class="mk">' + icono + '</span>' + etiqueta + '</button>';
+}
 function pintarLista(){
   if (!sesion) return;
   const cont = document.getElementById('lista');
   const vis = animalesVisibles();
+  const cerrado = !!sesion.enviado;
   actualizarProgreso();
+  actualizarEstadoCierre();
 
   if (!vis.length){
     cont.innerHTML = '<div class="vacio"><span class="ic">🔎</span>' +
@@ -877,12 +902,13 @@ function pintarLista(){
         '</div>' +
       '</div>' +
       '<div class="a-btns">' +
-        '<button class="a-btn p" aria-pressed="' + (a.resultado==='PREÑADA') + '" onclick="marcar(\'' + a.id + '\',\'PREÑADA\')"><span class="mk">●</span>Preñada</button>' +
-        '<button class="a-btn v" aria-pressed="' + (a.resultado==='VACIA') + '" onclick="marcar(\'' + a.id + '\',\'VACIA\')"><span class="mk">●</span>Vacía</button>' +
-        (esPrenada(a) ? '<button class="a-btn a" aria-pressed="' + (a.resultado==='ABORTO') + '" onclick="marcar(\'' + a.id + '\',\'ABORTO\')"><span class="mk">◆</span>Aborto</button>' : '') +
+        botonResultado(a, 'PREÑADA', 'p', '●', 'Preñada', cerrado) +
+        botonResultado(a, 'VACIA', 'v', '●', 'Vacía', cerrado) +
+        (esPrenada(a) ? botonResultado(a, 'ABORTO', 'a', '◆', 'Aborto', cerrado) : '') +
       '</div>' +
       '<div class="a-extra">' +
         '<textarea class="a-nota' + (a.comentario ? ' tiene' : '') + '" rows="1" placeholder="Comentario" ' +
+          (cerrado ? 'readonly ' : '') +
           'oninput="anotar(\'' + a.id + '\', this.value)">' + esc(a.comentario) + '</textarea>' +
       '</div>' +
       (a.agregado ? '' : '<button class="ver-mas" onclick="verDatos(\'' + a.id + '\', this)">Ver todos los datos</button>') +
@@ -890,6 +916,50 @@ function pintarLista(){
     '</article>';
   }
   cont.innerHTML = html;
+}
+// Franja de "cerrado", botón de agregar animal, y el botón grande de la
+// barra inferior (Guardar y enviar ↔ Reabrir para corregir).
+function actualizarEstadoCierre(){
+  if (!sesion) return;
+  const cerrado = !!sesion.enviado;
+
+  const aviso = document.getElementById('cerradoAviso');
+  if (aviso){
+    aviso.classList.toggle('oculto', !cerrado);
+    if (cerrado){
+      aviso.innerHTML = '<b>🔒 Chequeo cerrado</b>Se envió a la hoja de Google el ' +
+        esc(fechaLarga(sesion.enviadoEn || sesion.creado)) + '. Toca «Reabrir para corregir» para modificarlo.';
+    }
+  }
+
+  const btnAg = document.getElementById('btnAgregarAnimal');
+  if (btnAg) btnAg.classList.toggle('oculto', cerrado);
+
+  const btnEnviar = document.getElementById('btnEnviar');
+  if (btnEnviar){
+    if (cerrado){
+      btnEnviar.textContent = 'Reabrir para corregir';
+      btnEnviar.className = 'btn btn-ambar';
+      btnEnviar.onclick = reabrirSesion;
+    } else {
+      btnEnviar.textContent = 'Guardar y enviar';
+      btnEnviar.className = 'btn btn-verde';
+      btnEnviar.onclick = enviarSesion;
+    }
+  }
+}
+function reabrirSesion(){
+  if (!sesion || !sesion.enviado) return;
+  const ok = confirm('Vas a reabrir este chequeo para corregirlo. Al volver a enviarlo, se van a reemplazar las filas de este chequeo en la hoja de Google. ¿Continuar?');
+  if (!ok) return;
+  sesion.enviado = false;
+  sesion.reabierto = true;
+  sesion.reabiertoEn = new Date().toISOString();
+  guardarSesion().then(() => {
+    if (vista === 'campo') ver('campo', true); // refresca título/subtítulo
+    pintarLista();
+    toast('Chequeo reabierto. Ya puedes corregirlo.');
+  });
 }
 function actualizarProgreso(){
   if (!sesion) return;
@@ -906,6 +976,7 @@ function actualizarProgreso(){
 function buscarAnimal(id){ return sesion ? sesion.animales.find(a => a.id === id) : null; }
 
 function marcar(id, valor){
+  if (sesion && sesion.enviado) return; // cerrado: de solo lectura hasta que se reabra
   const a = buscarAnimal(id);
   if (!a) return;
   a.resultado = (a.resultado === valor) ? null : valor;
@@ -929,6 +1000,7 @@ function marcar(id, valor){
 }
 let _notaT = null;
 function anotar(id, txt){
+  if (sesion && sesion.enviado) return; // cerrado: de solo lectura hasta que se reabra
   const a = buscarAnimal(id);
   if (!a) return;
   a.comentario = txt;
@@ -961,6 +1033,7 @@ function prepararAgregar(){
   setTimeout(() => document.getElementById('nvNum').focus(), 100);
 }
 function agregarAnimal(){
+  if (sesion && sesion.enviado){ toast('Este chequeo está cerrado. Reábrelo para agregar animales.'); ver('campo'); return; }
   const num = document.getElementById('nvNum').value.trim();
   if (!num){ toast('Escribe el número del animal'); return; }
   const est = document.getElementById('nvEstado').value.trim();
@@ -1150,18 +1223,21 @@ function abrirSesion(id){
 /* =========================================================
    9. Exportar e enviar
    ========================================================= */
-function filasExport(){
-  const cols = sesion.heads.slice();
-  const cab = cols.concat(['PARAMETRO','RESULTADO','COMENTARIO','FECHA CHEQUEO','REVISADO POR']);
-  const fecha = fechaCorta(sesion.creado);
+// s es opcional: por defecto exporta la sesión abierta en modo campo,
+// pero la vista de detalle (solo lectura) puede pasar cualquier otra.
+function filasExport(s){
+  s = s || sesion;
+  const cols = s.heads.slice();
+  const cab = cols.concat(['PARAMETRO','RESULTADO','COMENTARIO','FECHA CHEQUEO','REVISADO POR','REABIERTO']);
+  const fecha = fechaCorta(s.creado);
   const filas = [cab];
-  for (const a of sesion.animales){
+  for (const a of s.animales){
     const f = cols.map(c => {
       if (a.datos && a.datos[c] !== undefined && a.datos[c] !== '') return a.datos[c];
-      if (c === sesion.colId) return a.num;
-      if (c === sesion.colStatus || norm(c) === 'status' || norm(c) === 'estado') return a.estado;
-      if (c === sesion.colDel) return a.del;
-      if (c === sesion.colDus) return a.dus;
+      if (c === s.colId) return a.num;
+      if (c === s.colStatus || norm(c) === 'status' || norm(c) === 'estado') return a.estado;
+      if (c === s.colDel) return a.del;
+      if (c === s.colDus) return a.dus;
       return '';
     });
     // convierte a número lo que sea numérico, para que Excel lo ordene bien
@@ -1174,19 +1250,21 @@ function filasExport(){
       a.resultado || 'SIN REVISAR',
       a.comentario || '',
       fecha,
-      sesion.operario || config.operario || ''
+      s.operario || config.operario || '',
+      s.reabierto ? 'SI' : 'NO'
     ]));
   }
   return filas;
 }
-function exportarExcel(){
-  if (!sesion) return;
+function exportarExcel(s){
+  s = s || sesion;
+  if (!s) return;
   try {
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(filasExport());
-    ws['!cols'] = sesion.heads.map(() => ({wch:13})).concat([{wch:12},{wch:13},{wch:30},{wch:13},{wch:16}]);
+    const ws = XLSX.utils.aoa_to_sheet(filasExport(s));
+    ws['!cols'] = s.heads.map(() => ({wch:13})).concat([{wch:12},{wch:13},{wch:30},{wch:13},{wch:16},{wch:10}]);
     XLSX.utils.book_append_sheet(wb, ws, 'Chequeo');
-    XLSX.writeFile(wb, 'chequeo_' + fechaCorta(sesion.creado).replace(/\//g,'-') + '.xlsx');
+    XLSX.writeFile(wb, 'chequeo_' + fechaCorta(s.creado).replace(/\//g,'-') + '.xlsx');
     toast('Excel descargado');
   } catch(e){
     toast('No se pudo crear el Excel');
@@ -1200,11 +1278,11 @@ function payload(s){
     fecha: s.creado,
     archivo: s.archivo || '',
     operario: s.operario || config.operario || '',
-    columnas: ['FECHA','SESION','ANIMAL','ESTADO','DEL','DUS','PARAMETRO','RESULTADO','COMENTARIO','REVISADO POR','AGREGADO EN CAMPO'],
+    columnas: ['FECHA','SESION','ANIMAL','ESTADO','DEL','DUS','PARAMETRO','RESULTADO','COMENTARIO','REVISADO POR','AGREGADO EN CAMPO','REABIERTO'],
     filas: s.animales.map(a => ([
       fechaCorta(s.creado), s.id, a.num, a.estado, a.del, a.dus,
       a.motivos.join(', '), a.resultado || 'SIN REVISAR', a.comentario || '',
-      s.operario || config.operario || '', a.agregado ? 'SI' : 'NO'
+      s.operario || config.operario || '', a.agregado ? 'SI' : 'NO', s.reabierto ? 'SI' : 'NO'
     ]))
   };
 }
@@ -1285,7 +1363,7 @@ function pintarAjustes(){
   const pend = sesiones.filter(s => !s.enviado && s.animales.some(a => a.resultado)).length;
   let txt = sesiones.length + ' chequeos guardados en la tablet · ' + pend + ' sin enviar.';
   info.textContent = txt;
-  pintarBorrado();
+  pintarListaChequeos();
   if (navigator.storage && navigator.storage.persisted){
     navigator.storage.persisted().then(p => {
       info.textContent = txt + (p ? ' Almacenamiento protegido.' : ' Almacenamiento normal.');
@@ -1293,9 +1371,9 @@ function pintarAjustes(){
   }
 }
 
-/* ---- borrar un chequeo (tablet + hoja de Google) ---- */
-function pintarBorrado(){
-  const cont = document.getElementById('listaBorrar');
+/* ---- lista de chequeos guardados (Ajustes) → detalle de solo lectura ---- */
+function pintarListaChequeos(){
+  const cont = document.getElementById('listaChequeos');
   if (!cont) return;
   if (!sesiones.length){
     cont.innerHTML = '<div class="card-sub">No hay chequeos guardados.</div>';
@@ -1303,20 +1381,78 @@ function pintarBorrado(){
   }
   cont.innerHTML = sesiones.map(s => {
     const estado = s.enviado ? 'Enviado' : (s.animales.some(a => a.resultado) ? 'Sin enviar' : 'Sin empezar');
-    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dotted #e6ebe3">' +
-      '<div style="flex:1;min-width:0">' +
-        '<div style="font-weight:700">' + esc(fechaCorta(s.creado)) + '</div>' +
-        '<div style="font-size:.82rem;color:var(--muted)">' + s.animales.length + ' animales · ' + estado + '</div>' +
-      '</div>' +
-      '<button class="btn btn-texto" style="width:auto;padding:0 14px" onclick="borrarSesion(\'' + s.id + '\')">Borrar</button>' +
-    '</div>';
+    return '<button class="ses" style="padding:9px 0;border-bottom:1px dotted #e6ebe3" onclick="verDetalle(\'' + s.id + '\')">' +
+      '<span class="ses-info">' +
+        '<span style="font-weight:700">' + esc(fechaCorta(s.creado)) + '</span>' +
+        '<span class="ses-det">' + s.animales.length + ' animales · ' + estado + '</span>' +
+      '</span>' +
+      '<span class="ses-flecha">›</span>' +
+    '</button>';
   }).join('');
 }
 
+/* ---- detalle de un chequeo, de solo lectura ---- */
+let _sesionDetalle = null;
+function verDetalle(id){
+  const s = sesiones.find(x => x.id === id);
+  if (!s) return;
+  _sesionDetalle = s;
+  pintarDetalle(s);
+  ver('sesion');
+}
+function pintarDetalle(s){
+  const cont = document.getElementById('resumenSesion');
+  if (!cont) return;
+  const tot = s.animales.length;
+  const pren = s.animales.filter(a => a.resultado === 'PREÑADA').length;
+  const vac = s.animales.filter(a => a.resultado === 'VACIA').length;
+  const abo = s.animales.filter(a => a.resultado === 'ABORTO').length;
+  const sinRev = s.animales.filter(a => !a.resultado).length;
+
+  let html = '<div class="card">' +
+    '<h3>' + esc(fechaLarga(s.creado)) + '</h3>' +
+    '<div class="card-sub">Archivo: ' + esc(s.archivo || '—') + '</div>' +
+    '<div class="card-sub">Revisó: ' + esc(s.operario || '—') + '</div>';
+
+  html += s.enviado
+    ? '<div class="aviso bien" style="margin-top:12px"><b>Enviado a la hoja de Google</b>' +
+      (s.enviadoEn ? esc(fechaLarga(s.enviadoEn)) : '') +
+      (s.reabierto ? ' · Se reabrió para corregir después de enviarse' : '') + '</div>'
+    : '<div class="aviso malo" style="margin-top:12px"><b>No se ha enviado a la hoja de Google</b>Solo está guardado en esta tablet.</div>';
+
+  html += '<div class="totales">' +
+    [['Animales',tot], ['Preñadas',pren], ['Vacías',vac], ['Abortos',abo], ['Sin revisar',sinRev]]
+      .map(([etq,val]) => '<div><b>' + val + '</b><span>' + esc(etq) + '</span></div>').join('') +
+  '</div></div>';
+
+  html += '<div class="card"><h3>Animales</h3><div class="tabla-wrap" style="margin-top:10px"><table class="tabla-datos"><thead><tr>' +
+    '<th>Número</th><th>Estado</th><th>DEL</th><th>DUS</th><th>Parámetro</th><th>Resultado</th><th>Comentario</th>' +
+    '</tr></thead><tbody>' +
+    s.animales.map(a => '<tr>' +
+      '<td>' + esc(a.num) + '</td>' +
+      '<td>' + esc(a.estado) + '</td>' +
+      '<td>' + esc(a.del) + '</td>' +
+      '<td>' + esc(a.dus) + '</td>' +
+      '<td>' + esc(a.motivos.join(', ')) + '</td>' +
+      '<td>' + esc(a.resultado || 'Sin revisar') + '</td>' +
+      '<td>' + esc(a.comentario || '') + '</td>' +
+    '</tr>').join('') +
+  '</tbody></table></div></div>';
+
+  html += '<div style="margin:16px 0"><button class="btn btn-borde" onclick="exportarExcel(_sesionDetalle)">⬇ Excel</button></div>';
+
+  html += '<div style="margin:34px 0 40px;padding-top:18px;border-top:1px solid var(--line)">' +
+    '<button class="btn btn-texto" onclick="borrarSesion(\'' + s.id + '\')">🗑 Borrar este chequeo</button></div>';
+
+  cont.innerHTML = html;
+}
+
+/* ---- borrar un chequeo (tablet + hoja de Google) — solo desde el detalle ---- */
 function quitarSesionLocal_(id){
   return dbBorrar('sesiones', id).then(() => cargarSesiones()).then(() => {
     if (sesion && sesion.id === id) sesion = null;
-    pintarBorrado();
+    if (_sesionDetalle && _sesionDetalle.id === id) _sesionDetalle = null;
+    pintarListaChequeos();
     if (vista === 'inicio') pintarSesiones();
   });
 }
@@ -1324,17 +1460,20 @@ function quitarSesionLocal_(id){
 function borrarSesion(id){
   const s = sesiones.find(x => x.id === id);
   if (!s) return;
+  const n = s.animales.length;
 
   // nunca se envió: no hay nada que mover en la hoja, se borra solo de la tablet
   if (!s.enviado){
-    if (!confirm('Este chequeo nunca se envió a la hoja de Google. Se va a borrar solo de la tablet. ¿Continuar?')) return;
-    quitarSesionLocal_(id).then(() => toast('Chequeo borrado'));
+    const texto = 'Se va a borrar este chequeo de la tablet: ' + n + (n === 1 ? ' animal' : ' animales') +
+      '. Nunca se envió a la hoja de Google, así que ahí no hay nada que borrar. ¿Continuar?';
+    if (!confirm(texto)) return;
+    quitarSesionLocal_(id).then(() => { irAtras(); toast('Chequeo borrado'); });
     return;
   }
 
-  const n = s.animales.length;
-  const texto = 'Se van a mover ' + n + (n === 1 ? ' fila' : ' filas') +
-    ' a la papelera de la hoja de Google, y el chequeo se va a borrar de la tablet. ¿Continuar?';
+  const texto = 'Vas a borrar este chequeo: se pierden ' + n + (n === 1 ? ' animal' : ' animales') +
+    ' de la tablet y ' + n + (n === 1 ? ' fila' : ' filas') +
+    ' de la hoja de Google (se mueven a la papelera, no se eliminan). ¿Continuar?';
   if (!confirm(texto)) return;
 
   // sin internet no se puede tocar la hoja: no se borra nada, ni de la tablet
@@ -1345,6 +1484,7 @@ function borrarSesion(id){
 
   pedir({accion:'borrar', sesionId:s.id}).then(j => {
     return quitarSesionLocal_(id).then(() => {
+      irAtras();
       const mov = j.movidas || 0;
       toast(mov + (mov === 1 ? ' fila movida a la papelera. Chequeo borrado.' : ' filas movidas a la papelera. Chequeo borrado.'));
     });
