@@ -22,6 +22,9 @@
     --alerta:#a3231c;
     --alerta-suave:#fbe9e8;
     --azul:#20618f;
+    --aborto:#c2185b;
+    --aborto-suave:#fce4ec;
+    --aborto-oscuro:#8f0f40;
     --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
     --tap:60px;
   }
@@ -82,6 +85,7 @@
   }
   .animal.hecho-p{border-left-color:var(--verde);background:#fbfdfb}
   .animal.hecho-v{border-left-color:var(--ambar);background:#fffdfa}
+  .animal.hecho-a{border-left-color:var(--aborto);background:#fdf7fa}
   .a-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:12px}
   .a-num{font-size:2rem;font-weight:800;letter-spacing:-0.03em;line-height:1;font-variant-numeric:tabular-nums}
   .a-meta{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -93,6 +97,7 @@
   .chip.param{background:var(--verde-suave);color:var(--verde);font-weight:700}
   .chip.nuevo{background:#f3e8f7;color:#7b3b8f;font-weight:700}
   .a-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .a-btns .a-btn.a{grid-column:1 / -1}
   .a-btn{
     min-height:var(--tap);border-radius:12px;border:2px solid var(--line);
     background:var(--paper);font-weight:700;font-size:1.05rem;
@@ -101,8 +106,16 @@
   .a-btn .mk{font-size:1.2rem;opacity:.35}
   .a-btn.p{color:var(--verde);border-color:#bcd9c5}
   .a-btn.v{color:var(--ambar);border-color:#e6cdb1}
+  .a-btn.a{color:var(--aborto);border-color:#eab8cd}
   .a-btn.p[aria-pressed="true"]{background:var(--verde);color:#fff;border-color:var(--verde)}
   .a-btn.v[aria-pressed="true"]{background:var(--ambar);color:#fff;border-color:var(--ambar)}
+  /* Aborto se distingue también por el relleno (rayado), no solo por el color,
+     para que se note aunque no se perciban bien los colores. */
+  .a-btn.a[aria-pressed="true"]{
+    color:#fff;border-color:var(--aborto);background-color:var(--aborto);
+    background-image:repeating-linear-gradient(135deg,
+      var(--aborto) 0 7px, var(--aborto-oscuro) 7px 14px);
+  }
   .a-btn[aria-pressed="true"] .mk{opacity:1}
   .a-btn:active{transform:scale(.985)}
   .a-extra{margin-top:10px;display:flex;gap:10px;align-items:stretch}
@@ -318,6 +331,7 @@
       <button class="fchip" id="f-pend" aria-pressed="false" onclick="setFiltro('pend')">Pendientes</button>
       <button class="fchip" id="f-prenadas" aria-pressed="false" onclick="setFiltro('prenadas')">Preñadas</button>
       <button class="fchip" id="f-vacias" aria-pressed="false" onclick="setFiltro('vacias')">Vacías</button>
+      <button class="fchip" id="f-abortos" aria-pressed="false" onclick="setFiltro('abortos')">Abortos</button>
     </div>
     <div class="lista" id="lista"></div>
     <div style="margin:18px 0 10px">
@@ -477,6 +491,12 @@ let params = JSON.parse(JSON.stringify(PARAMS_DEF)).map(p => (p.activo = true, p
 function norm(v){
   if (v === null || v === undefined) return '';
   return String(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
+}
+// El botón de Aborto solo debe verse en animales cuyo estado (el STATUS de
+// DairyPlan) empieza por PREÑ — mismo criterio "empieza por" que ya usan
+// las reglas de parámetros (ver coincideEstado).
+function esPrenada(a){
+  return norm(a.estado).startsWith('pren');
 }
 function numero(v){
   if (v === null || v === undefined || v === '') return null;
@@ -798,7 +818,7 @@ function cargarSesiones(){
    ========================================================= */
 function setFiltro(f){
   filtro = f;
-  const mapa = {todas:'f-todas', pend:'f-pend', prenadas:'f-prenadas', vacias:'f-vacias'};
+  const mapa = {todas:'f-todas', pend:'f-pend', prenadas:'f-prenadas', vacias:'f-vacias', abortos:'f-abortos'};
   Object.keys(mapa).forEach(k => {
     document.getElementById(mapa[k]).setAttribute('aria-pressed', k === f ? 'true' : 'false');
   });
@@ -815,6 +835,7 @@ function animalesVisibles(){
     if (filtro === 'pend' && a.resultado) return false;
     if (filtro === 'prenadas' && a.resultado !== 'PREÑADA') return false;
     if (filtro === 'vacias' && a.resultado !== 'VACIA') return false;
+    if (filtro === 'abortos' && a.resultado !== 'ABORTO') return false;
     if (q && !norm(a.num).includes(q) && !norm(a.estado).includes(q)) return false;
     return true;
   });
@@ -838,7 +859,7 @@ function pintarLista(){
       html += '<div class="grupo">' + esc(est) + '</div>';
       estadoPrev = est;
     }
-    const cls = a.resultado === 'PREÑADA' ? ' hecho-p' : (a.resultado === 'VACIA' ? ' hecho-v' : '');
+    const cls = a.resultado === 'PREÑADA' ? ' hecho-p' : (a.resultado === 'VACIA' ? ' hecho-v' : (a.resultado === 'ABORTO' ? ' hecho-a' : ''));
     html += '<article class="animal' + cls + '" id="an_' + a.id + '">' +
       '<div class="a-head">' +
         '<div class="a-num">' + esc(a.num || '—') + '</div>' +
@@ -852,6 +873,7 @@ function pintarLista(){
       '<div class="a-btns">' +
         '<button class="a-btn p" aria-pressed="' + (a.resultado==='PREÑADA') + '" onclick="marcar(\'' + a.id + '\',\'PREÑADA\')"><span class="mk">●</span>Preñada</button>' +
         '<button class="a-btn v" aria-pressed="' + (a.resultado==='VACIA') + '" onclick="marcar(\'' + a.id + '\',\'VACIA\')"><span class="mk">●</span>Vacía</button>' +
+        (esPrenada(a) ? '<button class="a-btn a" aria-pressed="' + (a.resultado==='ABORTO') + '" onclick="marcar(\'' + a.id + '\',\'ABORTO\')"><span class="mk">◆</span>Aborto</button>' : '') +
       '</div>' +
       '<div class="a-extra">' +
         '<textarea class="a-nota' + (a.comentario ? ' tiene' : '') + '" rows="1" placeholder="Comentario" ' +
@@ -869,10 +891,11 @@ function actualizarProgreso(){
   const hechas = sesion.animales.filter(a => a.resultado).length;
   const pren = sesion.animales.filter(a => a.resultado === 'PREÑADA').length;
   const vac = sesion.animales.filter(a => a.resultado === 'VACIA').length;
+  const abo = sesion.animales.filter(a => a.resultado === 'ABORTO').length;
   document.getElementById('progHecho').textContent = hechas;
   document.getElementById('progTotal').textContent = tot;
   document.getElementById('progFill').style.width = (tot ? (hechas/tot*100) : 0) + '%';
-  document.getElementById('progDetalle').textContent = pren + ' preñadas · ' + vac + ' vacías';
+  document.getElementById('progDetalle').textContent = pren + ' preñadas · ' + vac + ' vacías · ' + abo + ' abortos';
 }
 function buscarAnimal(id){ return sesion ? sesion.animales.find(a => a.id === id) : null; }
 
@@ -887,10 +910,11 @@ function marcar(id, valor){
   if (filtro === 'todas'){
     const el = document.getElementById('an_'+id);
     if (el){
-      el.className = 'animal' + (a.resultado === 'PREÑADA' ? ' hecho-p' : (a.resultado === 'VACIA' ? ' hecho-v' : ''));
-      const btns = el.querySelectorAll('.a-btn');
-      btns[0].setAttribute('aria-pressed', String(a.resultado === 'PREÑADA'));
-      btns[1].setAttribute('aria-pressed', String(a.resultado === 'VACIA'));
+      el.className = 'animal' + (a.resultado === 'PREÑADA' ? ' hecho-p' : (a.resultado === 'VACIA' ? ' hecho-v' : (a.resultado === 'ABORTO' ? ' hecho-a' : '')));
+      const bp = el.querySelector('.a-btn.p'), bv = el.querySelector('.a-btn.v'), ba = el.querySelector('.a-btn.a');
+      if (bp) bp.setAttribute('aria-pressed', String(a.resultado === 'PREÑADA'));
+      if (bv) bv.setAttribute('aria-pressed', String(a.resultado === 'VACIA'));
+      if (ba) ba.setAttribute('aria-pressed', String(a.resultado === 'ABORTO'));
     }
     actualizarProgreso();
   } else {
@@ -1093,6 +1117,7 @@ function pintarSesiones(){
     const hechas = s.animales.filter(a => a.resultado).length;
     const pren = s.animales.filter(a => a.resultado === 'PREÑADA').length;
     const vac = s.animales.filter(a => a.resultado === 'VACIA').length;
+    const abo = s.animales.filter(a => a.resultado === 'ABORTO').length;
     const pip = s.enviado ? 'pip-sync' : (hechas ? 'pip-pend' : 'pip-local');
     const estado = s.enviado ? 'Enviado' : (hechas === s.animales.length && hechas > 0 ? 'Sin enviar' : 'En curso');
     return '<div class="card" style="padding:12px 14px">' +
@@ -1100,7 +1125,7 @@ function pintarSesiones(){
         '<span class="ses-pip ' + pip + '"></span>' +
         '<span class="ses-info">' +
           '<span class="ses-fecha">' + esc(fechaLarga(s.creado)) + '</span>' +
-          '<span class="ses-det">' + hechas + ' de ' + s.animales.length + ' revisadas · ' + pren + ' preñadas · ' + vac + ' vacías · ' + estado + '</span>' +
+          '<span class="ses-det">' + hechas + ' de ' + s.animales.length + ' revisadas · ' + pren + ' preñadas · ' + vac + ' vacías · ' + abo + ' abortos · ' + estado + '</span>' +
         '</span>' +
         '<span class="ses-flecha">›</span>' +
       '</button></div>';

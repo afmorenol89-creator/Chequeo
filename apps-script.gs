@@ -8,7 +8,10 @@
  *   Preparados        → listas enviadas desde el computador, esperando que la tablet las recoja.
  *   Preparados_Index  → control de esas listas.
  *
- * VERSIÓN 2 — si ya tenías la anterior, después de pegar esto hay que hacer
+ * VERSIÓN 3 — agrega el resultado ABORTO (además de PREÑADA/VACIA) y su
+ * conteo en la pestaña Resumen (columna ABORTOS, al final para no correr
+ * las columnas de las filas históricas ya guardadas).
+ * Si ya tenías una versión anterior, después de pegar esto hay que hacer
  * Implementar → Administrar implementaciones → lápiz → Versión nueva → Implementar.
  */
 
@@ -60,8 +63,10 @@ function guardarChequeo_(libro, datos) {
         .setValues(datos.filas);
   }
 
+  // ABORTOS va al final de los encabezados (no entre VACIAS y SIN REVISAR)
+  // para no correr de columna los datos de los chequeos ya guardados.
   var res = hoja_(libro, 'Resumen',
-    ['FECHA', 'SESION', 'ARCHIVO', 'REVISADO POR', 'ANIMALES', 'PRENADAS', 'VACIAS', 'SIN REVISAR', 'RECIBIDO']);
+    ['FECHA', 'SESION', 'ARCHIVO', 'REVISADO POR', 'ANIMALES', 'PRENADAS', 'VACIAS', 'SIN REVISAR', 'RECIBIDO', 'ABORTOS']);
   var iRes = datos.columnas.indexOf('RESULTADO');
   var cuenta = function (v) {
     return datos.filas.filter(function (f) { return f[iRes] === v; }).length;
@@ -76,7 +81,7 @@ function guardarChequeo_(libro, datos) {
     datos.filas.length ? datos.filas[0][0] : '',
     datos.sesionId, datos.archivo || '', datos.operario || '',
     datos.filas.length, cuenta('PREÑADA'), cuenta('VACIA'), cuenta('SIN REVISAR'),
-    new Date()
+    new Date(), cuenta('ABORTO')
   ]);
 
   return salida_({ok: true, filas: datos.filas.length});
