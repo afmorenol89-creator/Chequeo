@@ -5,7 +5,7 @@
    que no son el chequeo reproductivo (que tiene su propia base).
    ========================================================= */
 const DB_NOMBRE_FINCA = 'lotes-ordeno';
-const DB_VER_FINCA = 2;
+const DB_VER_FINCA = 3;
 let _dbFinca = null;
 
 function abrirDB(){
@@ -18,6 +18,8 @@ function abrirDB(){
       if (!db.objectStoreNames.contains('animales')) db.createObjectStore('animales', {keyPath:'numero'});
       // cola de movimientos hechos en este dispositivo, esperando subir a la hoja
       if (!db.objectStoreNames.contains('pendientes')) db.createObjectStore('pendientes', {keyPath:'id'});
+      // cola de acciones individuales (nuevo animal, sacar, reactivar) esperando subir
+      if (!db.objectStoreNames.contains('accionesPendientes')) db.createObjectStore('accionesPendientes', {keyPath:'id'});
     };
     req.onsuccess = e => { _dbFinca = e.target.result; res(_dbFinca); };
     req.onerror = () => rej(req.error);

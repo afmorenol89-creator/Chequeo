@@ -13,9 +13,11 @@ let decisionesSalida = {};   // numero (string) -> {tipo, texto}
 let animalesPorNumero = {};   // numero (string) -> {numero, nombre, lote, origen, ingresado_por, fecha_entrada}
 let lotesDisponibles = [];    // ej. [1,2,3]
 let movimientosRecientes = []; // últimos movimientos de toda la finca (para el historial de cada animal)
+let salidasRecientes = [];     // animales sacados en los últimos 30 días
 let animalSeleccionado = null; // numero (string) abierto en la ficha
 let rapidoLote = null;         // lote destino elegido en modo rápido
 let rapidoHechos = {};         // numero (string) -> true, ya tocado en esta sesión de modo rápido
+let nuevoLoteElegido = '';     // lote elegido en la pantalla de Nuevo animal
 
 const COL_NUM = 'numero de animal'; // ya pasado por norm()
 const COL_NOM = 'nombre';
@@ -25,7 +27,7 @@ const COL_NOM = 'nombre';
    ========================================================= */
 function ver(v){
   vista = v;
-  ['quien', 'ajustes', 'inicio', 'cargar', 'revision', 'resultado', 'ficha', 'rapido'].forEach(n => {
+  ['quien', 'ajustes', 'inicio', 'cargar', 'revision', 'resultado', 'ficha', 'rapido', 'nuevo', 'salidas'].forEach(n => {
     const el = document.getElementById('v-' + n);
     if (el) el.classList.toggle('oculto', n !== v);
   });
@@ -55,7 +57,7 @@ function actualizarEstadoSync(){
 }
 window.addEventListener('online', () => {
   actualizarEstadoSync();
-  sincronizarPendientes(config.urlSheet).then(actualizarEstadoSync);
+  sincronizarTodo(config.urlSheet).then(actualizarEstadoSync);
 });
 window.addEventListener('offline', actualizarEstadoSync);
 
@@ -129,9 +131,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('net').addEventListener('click', () => {
     if (!navigator.onLine){ toast('Sin conexión'); return; }
-    sincronizarPendientes(config.urlSheet).then(r => {
+    sincronizarTodo(config.urlSheet).then(r => {
       actualizarEstadoSync();
       if (r.enviados) toast(r.enviados + ' cambio' + (r.enviados === 1 ? '' : 's') + ' subido' + (r.enviados === 1 ? '' : 's'));
+      if (r.conflictos && r.conflictos.length) toast(r.conflictos.length + ' acción(es) no se pudieron aplicar — revisa la lista.');
     });
   });
 
@@ -377,6 +380,7 @@ function refrescarYPintarLista(){
     ? pedirGet(config.urlSheet, 'lotes_estado').then(j => {
         lotesDisponibles = j.lotes || [];
         movimientosRecientes = j.movimientos_recientes || [];
+        salidasRecientes = j.salidas || [];
         animalesPorNumero = {};
         (j.animales || []).forEach(a => { animalesPorNumero[String(a.numero)] = a; });
         return guardarCacheServidor(j);
@@ -392,17 +396,21 @@ function guardarCacheServidor(j){
     .then(() => Promise.all([
       guardarConfigValor('cacheLotes', j.lotes || []),
       guardarConfigValor('cacheMovimientos', j.movimientos_recientes || []),
+      guardarConfigValor('cacheSalidas', j.salidas || []),
       Promise.all((j.animales || []).map(a => dbGuardar('animales', a)))
     ]));
 }
 
 function cargarCacheLocal(){
-  return Promise.all([dbTodo('animales'), dbLeer('config', 'cacheLotes'), dbLeer('config', 'cacheMovimientos')])
-    .then(([animales, lotesC, movC]) => {
+  return Promise.all([
+    dbTodo('animales'), dbLeer('config', 'cacheLotes'),
+    dbLeer('config', 'cacheMovimientos'), dbLeer('config', 'cacheSalidas')
+  ]).then(([animales, lotesC, movC, salC]) => {
       animalesPorNumero = {};
       animales.forEach(a => { animalesPorNumero[String(a.numero)] = a; });
       lotesDisponibles = (lotesC && lotesC.valor) || [];
       movimientosRecientes = (movC && movC.valor) || [];
+      salidasRecientes = (salC && salC.valor) || [];
     });
 }
 
@@ -426,14 +434,20 @@ function pintarListaPrincipal(){
     .filter(a => !filtro || norm(a.numero).indexOf(filtro) >= 0 || norm(a.nombre).indexOf(filtro) >= 0)
     .sort((a, b) => Number(a.numero) - Number(b.numero));
 
+  const banner = salidasRecientes.length
+    ? '<button type="button" class="btn btn-borde" style="margin-bottom:16px" onclick="verSalidas()">🗂 ' +
+        salidasRecientes.length + ' salida' + (salidasRecientes.length === 1 ? '' : 's') + ' reciente' +
+        (salidasRecientes.length === 1 ? '' : 's') + '</button>'
+    : '';
+
   if (!todos.length){
-    cont.innerHTML = '<div class="vacio"><span class="ic">🥛</span>' +
+    cont.innerHTML = banner + '<div class="vacio"><span class="ic">🥛</span>' +
       (filtro ? 'No encontré animales con ese número o nombre.' : 'No hay animales activos todavía. Carga un Excel para empezar.') +
       '</div>';
     return;
   }
 
-  let html = '';
+  let html = banner;
   const sinLote = todos.filter(a => !a.lote);
   if (sinLote.length){
     html += '<div class="grupo-titulo">Sin lote (' + sinLote.length + ')</div>' +
@@ -491,6 +505,21 @@ function pintarFicha(){
         ' data-lote="' + esc(lote) + '">Lote ' + esc(lote) + '</button>';
     }).join('') + '</div>';
 
+  html += '<div class="grupo-titulo">Sacar de ordeño</div>' +
+    '<button type="button" class="btn btn-borde" id="btnAbrirSacar">Sacar de ordeño</button>' +
+    '<div id="sacarBloque" class="oculto">' +
+      '<div class="motivos" style="margin-bottom:8px">' +
+        '<button type="button" class="motivo-btn" data-motivo-directo="Secado">Secado</button>' +
+        '<button type="button" class="motivo-btn" data-motivo-directo="Venta">Venta</button>' +
+        '<button type="button" class="motivo-btn" data-motivo-directo="Muerte">Muerte</button>' +
+        '<button type="button" class="motivo-btn" id="btnMotivoOtro">Otro</button>' +
+      '</div>' +
+      '<div id="otroBloque" class="oculto">' +
+        '<input type="text" id="sacarOtroTexto" placeholder="¿Cuál?" style="margin-bottom:8px">' +
+        '<button type="button" class="btn btn-ambar" id="btnConfirmarOtro">Sacar por este motivo</button>' +
+      '</div>' +
+    '</div>';
+
   html += '<div class="grupo-titulo">Historial</div>';
   html += historial.length
     ? '<div class="lista-nombres">' + historial.map(m =>
@@ -505,6 +534,47 @@ function pintarFicha(){
   cont.querySelectorAll('[data-lote]').forEach(btn => {
     btn.addEventListener('click', () => confirmarMoverLote(btn.getAttribute('data-lote')));
   });
+  document.getElementById('btnAbrirSacar').addEventListener('click', () => {
+    document.getElementById('sacarBloque').classList.toggle('oculto');
+  });
+  cont.querySelectorAll('[data-motivo-directo]').forEach(btn => {
+    btn.addEventListener('click', () => ejecutarSacar(a, btn.getAttribute('data-motivo-directo')));
+  });
+  document.getElementById('btnMotivoOtro').addEventListener('click', () => {
+    document.getElementById('otroBloque').classList.toggle('oculto');
+  });
+  document.getElementById('btnConfirmarOtro').addEventListener('click', () => {
+    const texto = document.getElementById('sacarOtroTexto').value.trim();
+    if (!texto){ toast('Escribe el motivo'); return; }
+    ejecutarSacar(a, 'Otro: ' + texto);
+  });
+}
+
+/** Saca al animal de ordeño (con confirmación) y lo quita de la lista de activos. */
+function ejecutarSacar(a, motivo){
+  if (!confirm('¿Sacar a ' + a.numero + ' ' + (a.nombre || '') + ' por ' + motivo.toLowerCase() + '?')) return;
+
+  const datos = {
+    numero: a.numero, motivo, usuario: config.usuario,
+    dispositivo: config.dispositivo, fecha_hora: new Date().toISOString()
+  };
+  const aplicarLocal = () => {
+    delete animalesPorNumero[animalSeleccionado];
+    salidasRecientes.unshift({
+      numero: a.numero, nombre: a.nombre, motivo_salida: motivo,
+      fecha_salida: datos.fecha_hora, sacado_por: config.usuario
+    });
+    toast('Sacado de ordeño');
+    irAInicio();
+  };
+
+  if (navigator.onLine && config.urlSheet){
+    pedir(config.urlSheet, Object.assign({accion: 'animal_salida'}, datos)).then(aplicarLocal)
+      .catch(e => toast('No se pudo sacar: ' + (e.message || 'revisa la conexión')));
+  } else {
+    aplicarLocal();
+    encolarAccion(config.urlSheet, 'animal_salida', datos).then(actualizarEstadoSync);
+  }
 }
 
 function confirmarMoverLote(loteNuevo){
@@ -585,4 +655,137 @@ function tocarRapido(numero){
   rapidoHechos[numero] = true;
   registrarMovimiento(a, rapidoLote);
   pintarRapidoTocar();
+}
+
+/* =========================================================
+   Nuevo animal (disponible para todos)
+   ========================================================= */
+function abrirNuevoAnimal(){
+  document.getElementById('nuevoNumero').value = '';
+  document.getElementById('nuevoNombre').value = '';
+  document.getElementById('nuevoAviso').innerHTML = '';
+  document.getElementById('btnCrearAnimal').disabled = false;
+  pintarNuevoLotes('');
+  ver('nuevo');
+}
+
+function pintarNuevoLotes(seleccionado){
+  nuevoLoteElegido = seleccionado;
+  const cont = document.getElementById('nuevoLotes');
+  cont.innerHTML = lotesDisponibles.map(lote => {
+    const activo = String(nuevoLoteElegido) === String(lote);
+    return '<button type="button" class="motivo-btn' + (activo ? ' mantener' : '') + '" ' +
+      'aria-pressed="' + (activo ? 'true' : 'false') + '" data-lote-nuevo="' + esc(lote) + '">Lote ' + esc(lote) + '</button>';
+  }).join('');
+  cont.querySelectorAll('[data-lote-nuevo]').forEach(b => {
+    b.addEventListener('click', () => {
+      const lote = b.getAttribute('data-lote-nuevo');
+      pintarNuevoLotes(String(nuevoLoteElegido) === String(lote) ? '' : lote);
+    });
+  });
+}
+
+function crearAnimalNuevo(){
+  const numRaw = document.getElementById('nuevoNumero').value.trim();
+  const nombre = document.getElementById('nuevoNombre').value.trim();
+  const aviso = document.getElementById('nuevoAviso');
+  aviso.innerHTML = '';
+
+  if (!/^\d+$/.test(numRaw)){
+    aviso.innerHTML = '<div class="aviso malo">Escribe un número entero.</div>';
+    return;
+  }
+  const numero = parseInt(numRaw, 10);
+
+  const existente = animalesPorNumero[String(numero)];
+  if (existente){
+    aviso.innerHTML = '<div class="aviso malo"><b>Ya existe activo</b>El número ' + numero + ' ya está activo (' +
+      esc(existente.nombre || 'sin nombre') + ').</div>';
+    return;
+  }
+  const enSalidas = salidasRecientes.find(s => String(s.numero) === String(numero));
+  if (enSalidas){
+    aviso.innerHTML = '<div class="aviso malo"><b>Ese número existe pero está fuera</b>' +
+      esc(enSalidas.nombre || '') + ' salió por ' + esc(enSalidas.motivo_salida || '') + '.</div>' +
+      '<button type="button" class="btn btn-verde" id="btnReactivarDesdeNuevo">Reactivar en vez de crear otro</button>';
+    document.getElementById('btnReactivarDesdeNuevo').addEventListener('click', () => reactivarDesdeSalidas(numero));
+    return;
+  }
+
+  const btn = document.getElementById('btnCrearAnimal');
+  btn.disabled = true;
+  const datos = {numero, nombre, usuario: config.usuario, dispositivo: config.dispositivo, lote: nuevoLoteElegido || ''};
+
+  const aplicarLocal = () => {
+    animalesPorNumero[String(numero)] = {numero, nombre, origen: 'manual', lote: datos.lote};
+    toast('Animal creado');
+    irAInicio();
+  };
+
+  if (navigator.onLine && config.urlSheet){
+    pedir(config.urlSheet, Object.assign({accion: 'animal_nuevo'}, datos)).then(aplicarLocal).catch(e => {
+      if (e.message === 'existeActivo'){
+        aviso.innerHTML = '<div class="aviso malo"><b>Ya existe activo</b>Otra tablet ya lo creó.</div>';
+      } else if (e.message === 'existeFuera'){
+        aviso.innerHTML = '<div class="aviso malo"><b>Ese número existe pero está fuera</b>Reactívalo desde Salidas recientes.</div>';
+      } else {
+        aviso.innerHTML = '<div class="aviso malo">No se pudo crear: ' + esc(e.message || 'revisa la conexión') + '</div>';
+      }
+      btn.disabled = false;
+    });
+  } else {
+    aplicarLocal();
+    encolarAccion(config.urlSheet, 'animal_nuevo', datos).then(actualizarEstadoSync);
+  }
+}
+
+/* =========================================================
+   Salidas recientes (red de seguridad para corregir errores)
+   ========================================================= */
+function verSalidas(){
+  pintarSalidas();
+  ver('salidas');
+}
+
+function pintarSalidas(){
+  const cont = document.getElementById('salidasCont');
+  if (!salidasRecientes.length){
+    cont.innerHTML = '<div class="vacio"><span class="ic">🗂</span>No hay salidas en los últimos 30 días.</div>';
+    return;
+  }
+  cont.innerHTML = '<div class="lista-nombres">' + salidasRecientes.map(s =>
+    '<div class="fila-animal" style="flex-direction:column;align-items:stretch;gap:8px">' +
+      '<div style="display:flex;gap:12px;align-items:center">' +
+        '<span class="num">' + esc(s.numero) + '</span>' +
+        '<span class="nom">' + esc(s.nombre || '(sin nombre)') + '</span>' +
+      '</div>' +
+      '<div class="meta">' + esc(s.motivo_salida || '') + ' · ' + esc(fechaCorta(s.fecha_salida)) + ' · ' + esc(s.sacado_por || '?') + '</div>' +
+      '<button type="button" class="btn btn-borde" style="margin-bottom:0" data-reactivar="' + esc(s.numero) + '">Reactivar</button>' +
+    '</div>'
+  ).join('') + '</div>';
+  cont.querySelectorAll('[data-reactivar]').forEach(btn => {
+    btn.addEventListener('click', () => reactivarDesdeSalidas(btn.getAttribute('data-reactivar')));
+  });
+}
+
+function reactivarDesdeSalidas(numero){
+  const s = salidasRecientes.find(x => String(x.numero) === String(numero));
+  if (!s) return;
+  if (!confirm('¿Reactivar a ' + numero + ' ' + (s.nombre || '') + '? Vuelve a estar activo, sin lote.')) return;
+
+  const datos = {numero, usuario: config.usuario, dispositivo: config.dispositivo};
+  const aplicarLocal = () => {
+    salidasRecientes = salidasRecientes.filter(x => String(x.numero) !== String(numero));
+    animalesPorNumero[String(numero)] = {numero: s.numero, nombre: s.nombre, origen: 'manual', lote: ''};
+    toast('Reactivado');
+    if (vista === 'salidas') pintarSalidas(); else irAInicio();
+  };
+
+  if (navigator.onLine && config.urlSheet){
+    pedir(config.urlSheet, Object.assign({accion: 'animal_reactivar'}, datos)).then(aplicarLocal)
+      .catch(e => toast('No se pudo reactivar: ' + (e.message || 'revisa la conexión')));
+  } else {
+    aplicarLocal();
+    encolarAccion(config.urlSheet, 'animal_reactivar', datos).then(actualizarEstadoSync);
+  }
 }

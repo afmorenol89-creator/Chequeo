@@ -57,6 +57,55 @@ function sincronizarPendientes(urlSheet){
   });
 }
 
+/* =========================================================
+   Cola de acciones individuales (nuevo animal, sacar, reactivar)
+   Va aparte de la cola de movimientos: cada una se manda a su propia
+   acción del Apps Script, no en lote.
+   ========================================================= */
+const ERRORES_CONFLICTO = ['existeActivo', 'existeFuera', 'noExiste'];
+
+function encolarAccion(urlSheet, accion, datos){
+  const item = {id: uuid(), accion, datos, creado: new Date().toISOString()};
+  return dbGuardar('accionesPendientes', item).then(() => sincronizarAcciones(urlSheet));
+}
+
+/** Sube las acciones pendientes una por una. Un conflicto de negocio (ya existe, no existe)
+ *  no tiene sentido reintentarlo solo, así que se quita de la cola y se reporta. */
+function sincronizarAcciones(urlSheet){
+  return dbTodo('accionesPendientes').then(items => {
+    if (!items.length) return {enviados: 0, quedan: 0, conflictos: []};
+    if (!navigator.onLine || !urlSheet) return {enviados: 0, quedan: items.length, conflictos: []};
+
+    let enviados = 0;
+    const conflictos = [];
+    return items.reduce((cadena, item) => cadena.then(() => {
+      const cuerpo = Object.assign({accion: item.accion}, item.datos);
+      return pedir(urlSheet, cuerpo).then(() => {
+        enviados++;
+        return dbBorrar('accionesPendientes', item.id);
+      }).catch(err => {
+        const msg = err && err.message;
+        if (ERRORES_CONFLICTO.indexOf(msg) >= 0){
+          conflictos.push({item, error: msg});
+          return dbBorrar('accionesPendientes', item.id);
+        }
+        // error de red u otro: se deja en la cola para reintentar después
+      });
+    }), Promise.resolve()).then(() =>
+      dbTodo('accionesPendientes').then(quedan => ({enviados, quedan: quedan.length, conflictos}))
+    );
+  });
+}
+
+/** Intenta subir movimientos y acciones a la vez. Lo que usan los botones de "sincronizar". */
+function sincronizarTodo(urlSheet){
+  return Promise.all([sincronizarPendientes(urlSheet), sincronizarAcciones(urlSheet)]).then(([m, a]) => ({
+    enviados: m.enviados + a.enviados,
+    quedan: m.quedan + a.quedan,
+    conflictos: a.conflictos
+  }));
+}
+
 function contarPendientes(){
-  return dbTodo('pendientes').then(p => p.length);
+  return Promise.all([dbTodo('pendientes'), dbTodo('accionesPendientes')]).then(([p, a]) => p.length + a.length);
 }

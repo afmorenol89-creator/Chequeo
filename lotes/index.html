@@ -55,6 +55,7 @@
     <div style="display:flex;gap:10px;margin-bottom:14px">
       <button type="button" class="btn btn-borde" style="margin-bottom:0" onclick="ver('cargar')">📥 Excel</button>
       <button type="button" class="btn btn-borde" style="margin-bottom:0" onclick="iniciarModoRapido()">⚡ Rápido</button>
+      <button type="button" class="btn btn-borde" style="margin-bottom:0" onclick="abrirNuevoAnimal()">＋ Nuevo</button>
     </div>
 
     <div class="campo" style="margin-bottom:6px">
@@ -71,6 +72,32 @@
 
   <section id="v-rapido" class="oculto">
     <div id="rapidoCont"></div>
+  </section>
+
+  <section id="v-nuevo" class="oculto">
+    <div class="card">
+      <div class="campo">
+        <label>Número (obligatorio)</label>
+        <input type="text" inputmode="numeric" id="nuevoNumero" placeholder="Ej. 45">
+      </div>
+      <div class="campo">
+        <label>Nombre (opcional)</label>
+        <input type="text" id="nuevoNombre" placeholder="Ej. Vanidosa">
+      </div>
+      <div class="campo" style="margin-bottom:0">
+        <label>Lote (opcional)</label>
+        <div class="motivos" id="nuevoLotes"></div>
+      </div>
+    </div>
+    <div id="nuevoAviso"></div>
+    <button type="button" class="btn btn-verde" id="btnCrearAnimal" onclick="crearAnimalNuevo()">Crear</button>
+    <button type="button" class="btn btn-borde" onclick="irAInicio()">Cancelar</button>
+  </section>
+
+  <section id="v-salidas" class="oculto">
+    <div class="card"><b>Salidas recientes</b><div class="top-sub">Últimos 30 días</div></div>
+    <div id="salidasCont"></div>
+    <button type="button" class="btn btn-borde" onclick="irAInicio()">Volver</button>
   </section>
 
   <section id="v-cargar" class="oculto">
