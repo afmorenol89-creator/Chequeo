@@ -17,8 +17,9 @@
  *   Config_Lotes      → lista de lotes disponibles (se siembra con 1, 2, 3 al crearla).
  *   Trabajadores      → lista de nombres para el selector "¿quién eres?" (se crea vacía).
  *
- * VERSIÓN 5 — agrega las acciones de "Lotes de ordeño": lotes_estado (GET), movimientos,
- * animal_nuevo, animal_salida, animal_reactivar. No cambia nada del chequeo reproductivo.
+ * VERSIÓN 6 — agrega accion=cargar_excel (aplica la revisión de la pantalla de carga)
+ * y los campos origen/ingresado_por/fecha_entrada en lotes_estado. No cambia nada del
+ * chequeo reproductivo.
  * Si ya tenías una versión anterior, después de pegar esto hay que hacer
  * Implementar → Administrar implementaciones → lápiz → Versión nueva → Implementar.
  */
@@ -38,6 +39,7 @@ function doPost(e) {
     if (datos.accion === 'animal_nuevo')      return animalNuevo_(libro, datos);
     if (datos.accion === 'animal_salida')     return animalSalida_(libro, datos);
     if (datos.accion === 'animal_reactivar')  return animalReactivar_(libro, datos);
+    if (datos.accion === 'cargar_excel')      return cargarExcel_(libro, datos);
     return guardarChequeo_(libro, datos);
 
   } catch (err) {
@@ -308,7 +310,11 @@ function lotesEstado_(libro) {
       var f = vals[i];
       var estado = String(f[2]);
       if (estado === 'activo') {
-        animales.push({numero: f[0], nombre: f[1]});
+        animales.push({
+          numero: f[0], nombre: f[1], origen: f[3],
+          ingresado_por: f[5],
+          fecha_entrada: f[4] instanceof Date ? f[4].toISOString() : String(f[4])
+        });
       } else if (estado === 'fuera') {
         var t = f[6] instanceof Date ? f[6].getTime() : new Date(f[6]).getTime();
         if (t && t >= limite) {
@@ -454,6 +460,48 @@ function animalReactivar_(libro, datos) {
 
   h.getRange(encontrado.fila, 3).setValue('activo');
   return salida_({ok: true});
+}
+
+/**
+ * POST accion=cargar_excel — aplica las decisiones ya tomadas en la pantalla de revisión.
+ * "Mantener" y "confirmar que se queda" no cambian nada, así que solo llega lo que sí
+ * cambia: nuevos (entran activos, sin lote) y salidas (con motivo, ya decidido en la app).
+ * Reintentar es seguro: un número que ya existe no se duplica, y una salida ya aplicada no se repite.
+ */
+function cargarExcel_(libro, datos) {
+  var h = hojaAnimales_(libro);
+  var indice = {};
+  if (h.getLastRow() > 1) {
+    var vals = h.getRange(2, 1, h.getLastRow() - 1, COLS_ANIMALES.length).getValues();
+    for (var i = 0; i < vals.length; i++) indice[String(vals[i][0])] = {fila: i + 2, valores: vals[i]};
+  }
+
+  var nuevos = datos.nuevos || [];
+  var filasNuevas = [];
+  var yaExistian = 0;
+  for (var j = 0; j < nuevos.length; j++) {
+    var n = nuevos[j];
+    if (indice[String(n.numero)]) { yaExistian++; continue; }
+    filasNuevas.push([n.numero, n.nombre || '', 'activo', 'excel', new Date(), 'Excel', '', '', '']);
+  }
+  if (filasNuevas.length) {
+    h.getRange(h.getLastRow() + 1, 1, filasNuevas.length, COLS_ANIMALES.length).setValues(filasNuevas);
+  }
+
+  var salidas = datos.salidas || [];
+  var sacados = 0;
+  for (var k = 0; k < salidas.length; k++) {
+    var s = salidas[k];
+    var enc = indice[String(s.numero)];
+    if (!enc || String(enc.valores[2]) === 'fuera') continue; // no existe o ya está fuera: no-op
+    h.getRange(enc.fila, 3).setValue('fuera');
+    h.getRange(enc.fila, 7).setValue(new Date());
+    h.getRange(enc.fila, 8).setValue(s.motivo || '');
+    h.getRange(enc.fila, 9).setValue(datos.usuario || '');
+    sacados++;
+  }
+
+  return salida_({ok: true, creados: filasNuevas.length, yaExistian: yaExistian, sacados: sacados});
 }
 
 /* --------------------------------------------------------- */

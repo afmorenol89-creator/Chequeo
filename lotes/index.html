@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1F7A3D">
+<title>Lotes de ordeño</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icon-192.png">
+<link rel="stylesheet" href="../comun/estilos.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<div class="net" id="net"><span class="pip"></span><span id="netTxt">Con internet</span></div>
+
+<div class="topbar">
+  <div class="topbar-in">
+    <a href="../index.html" class="icon-btn" aria-label="Inicio">←</a>
+    <div>
+      <div class="top-title">Lotes de ordeño</div>
+      <div class="top-sub">La Morelia</div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <section id="v-quien" class="oculto">
+    <div id="contQuien"></div>
+  </section>
+
+  <section id="v-ajustes" class="oculto">
+    <div class="card">
+      <div class="campo">
+        <label>URL de la hoja de Google (Apps Script)</label>
+        <input type="text" id="inputUrl" placeholder="https://script.google.com/macros/s/.../exec">
+        <small>Es la misma hoja que usa el chequeo reproductivo.</small>
+      </div>
+      <button type="button" class="btn btn-verde" onclick="guardarUrl()">Guardar</button>
+    </div>
+  </section>
+
+  <section id="v-inicio" class="oculto">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div>
+          <div style="font-weight:700;font-size:1.05rem">Hola, <span id="nombreUsuario"></span></div>
+          <div class="top-sub">Lotes de ordeño</div>
+        </div>
+        <button type="button" class="icon-btn" onclick="ver('ajustes')" aria-label="Ajustes">⚙</button>
+      </div>
+    </div>
+    <button type="button" class="btn btn-verde" onclick="ver('cargar')">📥 Cargar Excel</button>
+    <div class="vacio">
+      <span class="ic">🥛</span>
+      La lista principal, la ficha del animal y el modo rápido llegan en la siguiente fase.
+    </div>
+  </section>
+
+  <section id="v-cargar" class="oculto">
+    <div class="drop" id="drop">
+      <input type="file" id="archivoExcel" accept=".xlsx,.xls">
+      <span class="ic">📄</span>
+      <b>Toca o suelta el Excel aquí</b>
+      <small>Dos columnas: Número de animal y Nombre</small>
+    </div>
+    <div id="cargaInfo" style="margin-top:14px"></div>
+    <button type="button" class="btn btn-borde" onclick="ver('inicio')" style="margin-top:14px">Cancelar</button>
+  </section>
+
+  <section id="v-revision" class="oculto">
+    <div class="card" id="resumenRevision"></div>
+    <div id="grupoNuevos"></div>
+    <div id="grupoNoVienenExcel"></div>
+    <div id="grupoManual"></div>
+    <button type="button" class="btn btn-verde" id="btnConfirmarRevision" style="margin-top:6px" onclick="confirmarCargaExcel()">Guardar cambios</button>
+    <button type="button" class="btn btn-borde" onclick="ver('inicio')">Cancelar</button>
+  </section>
+
+  <section id="v-resultado" class="oculto">
+    <div class="card" id="resultadoTxt"></div>
+    <button type="button" class="btn btn-verde" onclick="ver('inicio')">Listo</button>
+  </section>
+
+</div>
+
+<script src="../comun/almacen.js"></script>
+<script src="../comun/sync.js"></script>
+<script src="../comun/usuario.js"></script>
+<script src="lotes.js"></script>
+
+<script>
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('../sw.js').catch(e => console.warn('SW', e));
+  });
+}
+</script>
+
+</body>
+</html>
