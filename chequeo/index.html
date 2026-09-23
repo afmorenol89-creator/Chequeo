@@ -8,6 +8,7 @@
 <link rel="manifest" href="../manifest.webmanifest">
 <link rel="icon" href="../icon-192.png">
 <script src="xlsx.full.min.js"></script>
+<script src="../comun/config.js"></script>
 <style>
   :root{
     --paper:#ffffff;
@@ -384,15 +385,8 @@
     <div class="card">
       <h3>Hoja de Google</h3>
       <div class="card-sub" style="margin-bottom:12px">Los chequeos se envían aquí cuando hay internet. Cada envío agrega filas, no borra las anteriores.</div>
-      <div class="campo">
-        <label for="urlSheet">Dirección de envío</label>
-        <input type="url" id="urlSheet" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
-        <small>La consigues al publicar el Apps Script. Está explicado en el archivo de instalación.</small>
-      </div>
-      <div class="btn-fila">
-        <button class="btn btn-borde" onclick="probarSheet()">Probar conexión</button>
-        <button class="btn btn-verde" onclick="guardarUrl()">Guardar</button>
-      </div>
+      <div class="card-sub" style="margin-bottom:12px">La dirección de la hoja ya viene configurada en la app. El PIN de la finca se pide una sola vez en cada dispositivo.</div>
+      <button class="btn btn-borde" onclick="probarSheet()">Probar conexión</button>
       <div id="ajustesMsg" style="margin-top:12px"></div>
     </div>
 
@@ -1059,17 +1053,22 @@ function agregarAnimal(){
    ========================================================= */
 function pedir(cuerpo){
   if (!config.urlSheet) return Promise.reject(new Error('sin-url'));
+  const pin = leerPin();
+  if (!pin) return Promise.reject(new Error('sin-pin'));
   return fetch(config.urlSheet, {
     method:'POST',
     headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify(cuerpo)
+    body: JSON.stringify(Object.assign({}, cuerpo, {pin}))
   }).then(r => {
     if (!r.ok) throw new Error('http-' + r.status);
     return r.text();
   }).then(t => {
     let j;
     try { j = JSON.parse(t); } catch(e){ throw new Error('respuesta-rara'); }
-    if (!j.ok) throw new Error(j.error || 'error');
+    if (!j.ok){
+      if (j.error === 'pinInvalido') pinRechazado();
+      throw new Error(j.error || 'error');
+    }
     return j;
   });
 }
@@ -1288,14 +1287,21 @@ function payload(s){
 }
 function enviarASheet(s){
   if (!config.urlSheet) return Promise.reject(new Error('sin-url'));
+  const pin = leerPin();
+  if (!pin) return Promise.reject(new Error('sin-pin'));
   return fetch(config.urlSheet, {
     method:'POST',
     // texto plano evita el preflight CORS que Apps Script no responde
     headers: {'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify(payload(s))
+    body: JSON.stringify(Object.assign(payload(s), {pin}))
   }).then(r => {
     if (!r.ok) throw new Error('http-' + r.status);
     return r.text();
+  }).then(t => {
+    // con PIN malo la hoja responde 200 con error: no debe contar como enviado
+    let j = null; try { j = JSON.parse(t); } catch(e){}
+    if (j && j.error === 'pinInvalido'){ pinRechazado(); throw new Error('pinInvalido'); }
+    return t;
   });
 }
 function enviarSesion(){
@@ -1357,7 +1363,6 @@ function sincronizarPendientes(manual){
    10. Ajustes
    ========================================================= */
 function pintarAjustes(){
-  document.getElementById('urlSheet').value = config.urlSheet || '';
   document.getElementById('operario').value = config.operario || '';
   const info = document.getElementById('infoAlmacen');
   const pend = sesiones.filter(s => !s.enviado && s.animales.some(a => a.resultado)).length;
@@ -1494,30 +1499,30 @@ function borrarSesion(id){
   });
 }
 
-function guardarUrl(){
-  const u = document.getElementById('urlSheet').value.trim();
-  config.urlSheet = u;
-  dbGuardar('config', {clave:'urlSheet', valor:u}).then(() => {
-    document.getElementById('ajustesMsg').innerHTML = '<div class="aviso bien">Dirección guardada.</div>';
-    sincronizarPendientes(false);
-    revisarPreparados();
-  });
-}
 function guardarOperario(){
   config.operario = document.getElementById('operario').value.trim();
   dbGuardar('config', {clave:'operario', valor:config.operario});
 }
 function probarSheet(){
-  const u = document.getElementById('urlSheet').value.trim();
+  const u = config.urlSheet;
   const msg = document.getElementById('ajustesMsg');
-  if (!u){ msg.innerHTML = '<div class="aviso malo">Escribe primero la dirección.</div>'; return; }
   if (!navigator.onLine){ msg.innerHTML = '<div class="aviso">No hay internet en este momento.</div>'; return; }
+  const pin = leerPin();
+  if (!pin){ asegurarPin().then(probarSheet); return; }
   msg.innerHTML = '<div class="aviso">Probando…</div>';
   fetch(u, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify({prueba:true, columnas:['PRUEBA'], filas:[['Conexión de prueba']]})})
+    body: JSON.stringify({prueba:true, columnas:['PRUEBA'], filas:[['Conexión de prueba']], pin})})
     .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
-    .then(() => { msg.innerHTML = '<div class="aviso bien">Conexión correcta. Revisa la hoja: debe aparecer una fila de prueba.</div>'; })
-    .catch(e => { msg.innerHTML = '<div class="aviso malo"><b>No respondió</b>Verifica que el Apps Script esté publicado con acceso para "cualquier persona".</div>'; });
+    .then(t => {
+      let j = null; try { j = JSON.parse(t); } catch(e){}
+      if (j && j.error === 'pinInvalido'){ pinRechazado(); throw new Error('pin'); }
+      msg.innerHTML = '<div class="aviso bien">Conexión correcta. Revisa la hoja: debe aparecer una fila de prueba.</div>';
+    })
+    .catch(e => {
+      msg.innerHTML = e.message === 'pin'
+        ? '<div class="aviso malo"><b>PIN incorrecto</b>Escríbelo de nuevo.</div>'
+        : '<div class="aviso malo"><b>No respondió</b>Verifica que el Apps Script esté publicado con acceso para "cualquier persona".</div>';
+    });
 }
 
 /* =========================================================
@@ -1531,6 +1536,9 @@ function pintarRed(){
 }
 window.addEventListener('online', () => { pintarRed(); sincronizarPendientes(false); if (vista === 'inicio') revisarPreparados(); });
 window.addEventListener('offline', pintarRed);
+window.addEventListener('pin-invalido', () => {
+  asegurarPin('El PIN no es correcto. Escríbelo de nuevo.').then(() => { sincronizarPendientes(false); revisarPreparados(); });
+});
 
 window.addEventListener('beforeunload', () => { if (sesion) { try { dbGuardar('sesiones', sesion); } catch(e){} } });
 
@@ -1538,13 +1546,13 @@ function iniciar(){
   pintarRed();
   pintarParams();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
-  Promise.all([dbLeer('config','urlSheet'), dbLeer('config','operario'), cargarSesiones()])
-    .then(([u, o]) => {
-      config.urlSheet = u ? u.valor : '';
+  Promise.all([dbLeer('config','operario'), cargarSesiones()])
+    .then(([o]) => {
+      config.urlSheet = FINCA.urlSheet; // fija, viene de comun/config.js
       config.operario = o ? o.valor : '';
       ver('inicio', true);
-      sincronizarPendientes(false);
-      revisarPreparados();
+      // el PIN se pide una vez por dispositivo; cuando ya está, se sube lo pendiente
+      asegurarPin().then(() => { sincronizarPendientes(false); revisarPreparados(); });
     })
     .catch(err => {
       console.error(err);

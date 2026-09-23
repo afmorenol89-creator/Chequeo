@@ -32,13 +32,11 @@
 
   <section id="v-ajustes" class="oculto">
     <div class="card">
-      <div class="campo">
-        <label>URL de la hoja de Google (Apps Script)</label>
-        <input type="text" id="inputUrl" placeholder="https://script.google.com/macros/s/.../exec">
-        <small>Es la misma hoja que usa el chequeo reproductivo.</small>
-      </div>
-      <button type="button" class="btn btn-verde" onclick="guardarUrl()">Guardar</button>
+      <b>Este dispositivo</b>
+      <div class="top-sub" style="margin-bottom:12px">La hoja de Google ya viene configurada en la app.</div>
+      <button type="button" class="btn btn-borde" onclick="cambiarUsuario()">Cambiar de usuario</button>
     </div>
+    <button type="button" class="btn btn-borde" onclick="irAInicio()">Volver</button>
   </section>
 
   <section id="v-inicio" class="oculto">
@@ -128,6 +126,7 @@
 </div>
 
 <script src="../comun/almacen.js"></script>
+<script src="../comun/config.js"></script>
 <script src="../comun/sync.js"></script>
 <script src="../comun/usuario.js"></script>
 <script src="lotes.js"></script>

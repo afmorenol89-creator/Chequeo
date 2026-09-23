@@ -67,50 +67,73 @@ window.addEventListener('offline', actualizarEstadoSync);
 function iniciar(){
   abrirDB().then(() => cargarConfig()).then(c => {
     config = c;
+    config.urlSheet = FINCA.urlSheet; // la URL es fija, no se guarda por dispositivo
     actualizarEstadoSync();
     seguirInicio();
   });
 }
 
+/** El PIN cambió o no sirvió: se vuelve a pedir. */
+window.addEventListener('pin-invalido', () => {
+  accesoInicial('El PIN no es correcto. Escríbelo de nuevo.');
+});
+
+/**
+ * Orden de arranque: PIN (una vez por dispositivo, con descarga de todos los datos de la hoja)
+ * → "¿quién eres?" (una vez por dispositivo) → lista principal.
+ */
 function seguirInicio(){
-  if (!config.urlSheet){ ver('ajustes'); return; }
+  if (!leerPin()){ accesoInicial(); return; }
   if (!config.usuario){ mostrarSelectorUsuarioInicial(); return; }
   document.getElementById('nombreUsuario').textContent = config.usuario;
   ver('inicio');
-  refrescarYPintarLista();
+  if (lotesDisponibles.length || Object.keys(animalesPorNumero).length) irAInicio();
+  else refrescarYPintarLista();
 }
 
-function guardarUrl(){
-  const v = document.getElementById('inputUrl').value.trim();
-  if (!v) return;
-  config.urlSheet = v;
-  guardarConfigValor('urlSheet', v).then(() => {
-    toast('Hoja guardada');
-    seguirInicio();
-  });
+/** Pide el PIN y, con él, descarga de la hoja todo lo que la app necesita (dispositivo nuevo). */
+function accesoInicial(aviso){
+  ver('quien');
+  const cont = document.getElementById('contQuien');
+  if (!navigator.onLine){
+    cont.innerHTML = '<div class="card"><h3 style="margin-bottom:8px">Falta conexión</h3>' +
+      '<div class="aviso">La primera vez, esta tablet necesita internet para descargar los datos de la finca.</div>' +
+      '<button type="button" class="btn btn-verde" id="btnReintentarAcceso">Reintentar</button></div>';
+    document.getElementById('btnReintentarAcceso').addEventListener('click', () => accesoInicial());
+    return;
+  }
+  cont.innerHTML = '';
+  asegurarPin(aviso).then(() => {
+    cont.innerHTML = '<div class="aviso">Descargando los datos de la hoja…</div>';
+    return pedirGet(config.urlSheet, 'lotes_estado');
+  }).then(j => aplicarEstadoServidor(j)).then(() => seguirInicio())
+    .catch(e => {
+      if (e.message === 'pinInvalido') return; // el evento 'pin-invalido' ya lo vuelve a pedir
+      cont.innerHTML = '<div class="card"><h3 style="margin-bottom:8px">No se pudo descargar</h3>' +
+        '<div class="aviso malo">' + esc(e.message || 'Revisa la conexión.') + '</div>' +
+        '<button type="button" class="btn btn-verde" id="btnReintentarAcceso">Reintentar</button></div>';
+      document.getElementById('btnReintentarAcceso').addEventListener('click', () => accesoInicial());
+    });
 }
 
 function mostrarSelectorUsuarioInicial(){
   ver('quien');
   const cont = document.getElementById('contQuien');
-  if (!navigator.onLine){
-    mostrarSelectorUsuario(cont, [], elegirUsuario);
-    return;
-  }
-  cont.innerHTML = '<div class="aviso">Cargando trabajadores…</div>';
-  pedirGet(config.urlSheet, 'lotes_estado').then(j => {
-    mostrarSelectorUsuario(cont, j.trabajadores || [], elegirUsuario);
-  }).catch(() => {
-    mostrarSelectorUsuario(cont, [], elegirUsuario);
-  });
+  dbLeer('config', 'cacheTrabajadores').then(c => {
+    if (c) return c.valor || [];
+    if (!navigator.onLine) return [];
+    return pedirGet(config.urlSheet, 'lotes_estado').then(j => j.trabajadores || []).catch(() => []);
+  }).then(lista => mostrarSelectorUsuario(cont, lista, elegirUsuario));
 }
 
 function elegirUsuario(nombre){
   config.usuario = nombre;
-  guardarConfigValor('usuario', nombre).then(() => {
-    document.getElementById('nombreUsuario').textContent = nombre;
-    ver('inicio');
-  });
+  guardarConfigValor('usuario', nombre).then(() => seguirInicio());
+}
+
+function cambiarUsuario(){
+  config.usuario = '';
+  guardarConfigValor('usuario', '').then(() => mostrarSelectorUsuarioInicial());
 }
 
 /* =========================================================
@@ -376,18 +399,21 @@ function confirmarCargaExcel(){
 
 /** Trae el estado de la hoja (o el caché local si no hay señal) y pinta la lista. */
 function refrescarYPintarLista(){
-  const traer = navigator.onLine && config.urlSheet
-    ? pedirGet(config.urlSheet, 'lotes_estado').then(j => {
-        lotesDisponibles = j.lotes || [];
-        movimientosRecientes = j.movimientos_recientes || [];
-        salidasRecientes = j.salidas || [];
-        animalesPorNumero = {};
-        (j.animales || []).forEach(a => { animalesPorNumero[String(a.numero)] = a; });
-        return guardarCacheServidor(j);
-      }).catch(() => cargarCacheLocal())
+  const traer = navigator.onLine && config.urlSheet && leerPin()
+    ? pedirGet(config.urlSheet, 'lotes_estado').then(aplicarEstadoServidor).catch(() => cargarCacheLocal())
     : cargarCacheLocal();
 
   return traer.then(aplicarPendientesLocales).then(pintarListaPrincipal);
+}
+
+/** Pone en memoria y guarda en el dispositivo todo lo que devolvió la hoja. */
+function aplicarEstadoServidor(j){
+  lotesDisponibles = j.lotes || [];
+  movimientosRecientes = j.movimientos_recientes || [];
+  salidasRecientes = j.salidas || [];
+  animalesPorNumero = {};
+  (j.animales || []).forEach(a => { animalesPorNumero[String(a.numero)] = a; });
+  return guardarCacheServidor(j);
 }
 
 function guardarCacheServidor(j){
@@ -397,6 +423,7 @@ function guardarCacheServidor(j){
       guardarConfigValor('cacheLotes', j.lotes || []),
       guardarConfigValor('cacheMovimientos', j.movimientos_recientes || []),
       guardarConfigValor('cacheSalidas', j.salidas || []),
+      guardarConfigValor('cacheTrabajadores', j.trabajadores || []),
       Promise.all((j.animales || []).map(a => dbGuardar('animales', a)))
     ]));
 }

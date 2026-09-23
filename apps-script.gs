@@ -17,17 +17,37 @@
  *   Config_Lotes      → lista de lotes disponibles (se siembra con 1, 2, 3 al crearla).
  *   Trabajadores      → lista de nombres para el selector "¿quién eres?" (se crea vacía).
  *
- * VERSIÓN 8 — lotes_estado ahora también responde por POST (accion=lotes_estado),
- * porque el GET cruzando de origen (GitHub Pages a Apps Script) falla por CORS en el
- * redireccionamiento de Google. La app de Lotes ya solo usa POST. No cambia nada del
- * chequeo reproductivo.
+ * VERSIÓN 9 — PIN de la finca. Toda solicitud (POST) debe traer "pin" y se compara con la
+ * propiedad del script PIN_FINCA; si no coincide, responde {ok:false, error:'pinInvalido'}.
+ * Si PIN_FINCA no existe, rechaza todo (así nadie entra por un olvido).
+ *
+ * PARA PONER O CAMBIAR EL PIN (el PIN nunca va escrito en el código, porque el repo es público):
+ *   Editor de Apps Script → ⚙ Configuración del proyecto → Propiedades del script →
+ *   Agregar propiedad → nombre PIN_FINCA, valor el PIN (mejor de 6 o más caracteres) → Guardar.
+ *   No hace falta redesplegar al cambiarlo.
+ *
+ * También: lotes_estado responde por POST (el GET desde otro origen falla por CORS) y doGet
+ * ya no devuelve datos, solo el aviso de servicio activo.
+ * No cambia nada del chequeo reproductivo.
  * Si ya tenías una versión anterior, después de pegar esto hay que hacer
  * Implementar → Administrar implementaciones → lápiz → Versión nueva → Implementar.
  */
 
+function pinValido_(pin) {
+  var esperado = PropertiesService.getScriptProperties().getProperty('PIN_FINCA');
+  return !!esperado && String(pin === undefined || pin === null ? '' : pin) === String(esperado);
+}
+
 function doPost(e) {
   try {
     var datos = JSON.parse(e.postData.contents);
+
+    if (!pinValido_(datos.pin)) {
+      Utilities.sleep(1000); // frena un poco a quien pruebe PIN tras PIN
+      return salida_({ok: false, error: 'pinInvalido'});
+    }
+    delete datos.pin;
+
     var libro = SpreadsheetApp.getActiveSpreadsheet();
 
     if (datos.prueba)                     return prueba_(libro);
@@ -49,16 +69,8 @@ function doPost(e) {
   }
 }
 
-function doGet(e) {
-  try {
-    var accion = e && e.parameter && e.parameter.accion;
-    if (accion === 'lotes_estado') {
-      return lotesEstado_(SpreadsheetApp.getActiveSpreadsheet());
-    }
-    return ContentService.createTextOutput('Servicio de chequeo reproductivo activo.');
-  } catch (err) {
-    return salida_({ok: false, error: String(err)});
-  }
+function doGet() {
+  return ContentService.createTextOutput('Servicio de chequeo reproductivo activo.');
 }
 
 /* ---------------------------------------------------------
@@ -297,7 +309,7 @@ function buscarAnimal_(h, numero) {
 }
 
 /**
- * GET ?accion=lotes_estado — todo lo que la app necesita para abrir sin más ida y vuelta:
+ * POST accion=lotes_estado — todo lo que la app necesita para abrir sin más ida y vuelta:
  * animales activos con su lote actual, lotes disponibles, trabajadores y salidas recientes.
  */
 function lotesEstado_(libro) {

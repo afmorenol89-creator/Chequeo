@@ -1,5 +1,5 @@
 /* Service worker: guarda la aplicación en la tablet para que abra sin internet. */
-const CACHE = 'chequeo-v10';
+const CACHE = 'chequeo-v11';
 const ARCHIVOS = [
   './',
   './index.html',
@@ -10,6 +10,7 @@ const ARCHIVOS = [
   './chequeo/xlsx.full.min.js',
   './comun/estilos.css',
   './comun/almacen.js',
+  './comun/config.js',
   './comun/sync.js',
   './comun/usuario.js',
   './lotes/index.html',
