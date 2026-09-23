@@ -22,19 +22,15 @@ function pedir(urlSheet, cuerpo){
   });
 }
 
-/** GET a la hoja, ej. pedirGet(url, 'lotes_estado'). */
+/**
+ * Pide una acción de "solo lectura", ej. pedirGet(url, 'lotes_estado').
+ * Va por POST (igual que `pedir`), no por GET: los Web Apps de Apps Script
+ * redirigen las peticiones GET a script.googleusercontent.com y ese salto
+ * no siempre trae los encabezados CORS correctos al llamarlo desde otro
+ * origen (como GitHub Pages) — con POST no pasa, así que evitamos GET del todo.
+ */
 function pedirGet(urlSheet, accion){
-  if (!urlSheet) return Promise.reject(new Error('sin-url'));
-  const sep = urlSheet.indexOf('?') >= 0 ? '&' : '?';
-  return fetch(urlSheet + sep + 'accion=' + encodeURIComponent(accion)).then(r => {
-    if (!r.ok) throw new Error('http-' + r.status);
-    return r.text();
-  }).then(t => {
-    let j;
-    try { j = JSON.parse(t); } catch (e) { throw new Error('respuesta-rara'); }
-    if (!j.ok) throw new Error(j.error || 'error');
-    return j;
-  });
+  return pedir(urlSheet, {accion});
 }
 
 /* =========================================================

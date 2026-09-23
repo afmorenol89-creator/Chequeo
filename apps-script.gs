@@ -17,8 +17,9 @@
  *   Config_Lotes      → lista de lotes disponibles (se siembra con 1, 2, 3 al crearla).
  *   Trabajadores      → lista de nombres para el selector "¿quién eres?" (se crea vacía).
  *
- * VERSIÓN 7 — agrega movimientos_recientes a lotes_estado (últimos 300 movimientos de
- * toda la finca, para el historial corto de la ficha del animal). No cambia nada del
+ * VERSIÓN 8 — lotes_estado ahora también responde por POST (accion=lotes_estado),
+ * porque el GET cruzando de origen (GitHub Pages a Apps Script) falla por CORS en el
+ * redireccionamiento de Google. La app de Lotes ya solo usa POST. No cambia nada del
  * chequeo reproductivo.
  * Si ya tenías una versión anterior, después de pegar esto hay que hacer
  * Implementar → Administrar implementaciones → lápiz → Versión nueva → Implementar.
@@ -40,6 +41,7 @@ function doPost(e) {
     if (datos.accion === 'animal_salida')     return animalSalida_(libro, datos);
     if (datos.accion === 'animal_reactivar')  return animalReactivar_(libro, datos);
     if (datos.accion === 'cargar_excel')      return cargarExcel_(libro, datos);
+    if (datos.accion === 'lotes_estado')      return lotesEstado_(libro);
     return guardarChequeo_(libro, datos);
 
   } catch (err) {
