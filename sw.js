@@ -1,12 +1,13 @@
 /* Service worker: guarda la aplicación en la tablet para que abra sin internet. */
-const CACHE = 'chequeo-v5';
+const CACHE = 'chequeo-v6';
 const ARCHIVOS = [
   './',
   './index.html',
-  './xlsx.full.min.js',
   './manifest.webmanifest',
   './icon-192.png',
-  './icon-512.png'
+  './icon-512.png',
+  './chequeo/index.html',
+  './chequeo/xlsx.full.min.js'
 ];
 
 self.addEventListener('install', e => {

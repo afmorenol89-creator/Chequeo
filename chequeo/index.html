@@ -1,0 +1,1564 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1F7A3D">
+<title>Chequeo Reproductivo</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icon-192.png">
+<script src="xlsx.full.min.js"></script>
+<style>
+  :root{
+    --paper:#ffffff;
+    --panel:#f1f4ee;
+    --ink:#16211a;
+    --muted:#5c6b5e;
+    --line:#d3dace;
+    --verde:#1f7a3d;
+    --verde-suave:#e4f2e7;
+    --ambar:#b8590a;
+    --ambar-suave:#fdeedd;
+    --alerta:#a3231c;
+    --alerta-suave:#fbe9e8;
+    --azul:#20618f;
+    --aborto:#c2185b;
+    --aborto-suave:#fce4ec;
+    --aborto-oscuro:#8f0f40;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --tap:60px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    background:var(--panel);color:var(--ink);font-family:var(--sans);
+    font-size:17px;line-height:1.45;min-height:100vh;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+  button{cursor:pointer;border:none;background:none}
+  :focus-visible{outline:3px solid var(--azul);outline-offset:2px}
+
+  .wrap{max-width:860px;margin:0 auto;padding:0 14px 120px}
+
+  /* ---------- barra superior ---------- */
+  .topbar{
+    position:sticky;top:0;z-index:30;background:var(--paper);
+    border-bottom:1px solid var(--line);
+    padding:calc(10px + env(safe-area-inset-top)) 14px 10px;
+  }
+  .topbar-in{max-width:860px;margin:0 auto;display:flex;align-items:center;gap:12px;min-height:44px}
+  .top-title{font-size:1.15rem;font-weight:700;letter-spacing:-0.01em;flex:1;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .top-sub{font-size:0.8rem;color:var(--muted);font-weight:400}
+  .icon-btn{
+    width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+    font-size:1.3rem;background:var(--panel);flex-shrink:0;
+  }
+  .icon-btn:active{background:var(--line)}
+
+  /* ---------- conexión ---------- */
+  .net{
+    display:flex;align-items:center;gap:8px;justify-content:center;
+    font-size:0.82rem;padding:7px 12px;background:#e8eee4;color:var(--muted);
+    border-bottom:1px solid var(--line);
+  }
+  .net.off{background:#fdf3e3;color:#8a5a10}
+  .net .pip{width:9px;height:9px;border-radius:50%;background:var(--verde)}
+  .net.off .pip{background:#c98a1a}
+
+  /* ---------- progreso ---------- */
+  .prog-wrap{background:var(--paper);padding:0 14px 12px;border-bottom:1px solid var(--line);
+    position:sticky;top:65px;z-index:29}
+  .prog-in{max-width:860px;margin:0 auto}
+  .prog-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+  .prog-count{font-size:1.5rem;font-weight:700;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
+  .prog-count small{font-size:0.95rem;font-weight:500;color:var(--muted)}
+  .prog-bar{height:10px;background:var(--panel);border-radius:5px;overflow:hidden}
+  .prog-fill{height:100%;background:var(--verde);width:0;transition:width .25s ease}
+
+  /* ---------- tarjetas de animal ---------- */
+  .lista{display:flex;flex-direction:column;gap:12px;margin-top:14px}
+  .animal{
+    background:var(--paper);border:1px solid var(--line);border-radius:14px;
+    padding:14px;border-left:6px solid var(--line);
+  }
+  .animal.hecho-p{border-left-color:var(--verde);background:#fbfdfb}
+  .animal.hecho-v{border-left-color:var(--ambar);background:#fffdfa}
+  .animal.hecho-a{border-left-color:var(--aborto);background:#fdf7fa}
+  .a-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:12px}
+  .a-num{font-size:2rem;font-weight:800;letter-spacing:-0.03em;line-height:1;font-variant-numeric:tabular-nums}
+  .a-meta{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .chip{
+    font-size:0.78rem;padding:3px 9px;border-radius:20px;background:var(--panel);
+    color:var(--muted);white-space:nowrap;font-weight:500;
+  }
+  .chip.estado{background:#e7edf3;color:var(--azul);font-weight:700}
+  .chip.param{background:var(--verde-suave);color:var(--verde);font-weight:700}
+  .chip.nuevo{background:#f3e8f7;color:#7b3b8f;font-weight:700}
+  .a-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .a-btns .a-btn.a{grid-column:1 / -1}
+  .a-btn{
+    min-height:var(--tap);border-radius:12px;border:2px solid var(--line);
+    background:var(--paper);font-weight:700;font-size:1.05rem;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+  }
+  .a-btn .mk{font-size:1.2rem;opacity:.35}
+  .a-btn.p{color:var(--verde);border-color:#bcd9c5}
+  .a-btn.v{color:var(--ambar);border-color:#e6cdb1}
+  .a-btn.a{color:var(--aborto);border-color:#eab8cd}
+  .a-btn.p[aria-pressed="true"]{background:var(--verde);color:#fff;border-color:var(--verde)}
+  .a-btn.v[aria-pressed="true"]{background:var(--ambar);color:#fff;border-color:var(--ambar)}
+  /* Aborto se distingue también por el relleno (rayado), no solo por el color,
+     para que se note aunque no se perciban bien los colores. */
+  .a-btn.a[aria-pressed="true"]{
+    color:#fff;border-color:var(--aborto);background-color:var(--aborto);
+    background-image:repeating-linear-gradient(135deg,
+      var(--aborto) 0 7px, var(--aborto-oscuro) 7px 14px);
+  }
+  .a-btn[aria-pressed="true"] .mk{opacity:1}
+  .a-btn:active{transform:scale(.985)}
+  .a-btn:disabled{opacity:.55;pointer-events:none}
+  .a-extra{margin-top:10px;display:flex;gap:10px;align-items:stretch}
+  .a-nota{
+    flex:1;min-height:48px;padding:11px 12px;border:1px solid var(--line);
+    border-radius:10px;background:var(--paper);resize:none;line-height:1.35;
+  }
+  .a-nota::placeholder{color:#93a094}
+  .a-nota:focus{outline:none;border-color:var(--azul);box-shadow:0 0 0 3px #20618f22}
+  .a-nota.tiene{border-color:#c9d6cb;background:#fbfcfa}
+  .a-nota[readonly]{background:var(--panel);color:var(--muted)}
+  .ver-mas{
+    background:none;color:var(--muted);font-size:0.85rem;padding:8px 2px;
+    text-decoration:underline;text-underline-offset:3px;
+  }
+  .a-datos{margin-top:8px;border-top:1px solid var(--line);padding-top:8px;
+    display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:0.85rem}
+  .a-datos div{display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-bottom:1px dotted #e6ebe3}
+  .a-datos span:first-child{color:var(--muted)}
+  .a-datos span:last-child{font-weight:600;text-align:right;word-break:break-word}
+
+  /* ---------- separador de estado ---------- */
+  .grupo{
+    display:flex;align-items:center;gap:10px;margin:20px 2px 2px;
+    font-size:0.9rem;font-weight:700;color:var(--muted);
+  }
+  .grupo::after{content:"";flex:1;height:1px;background:var(--line)}
+  .grupo:first-child{margin-top:4px}
+
+  /* ---------- botones generales ---------- */
+  .btn{
+    min-height:var(--tap);padding:0 22px;border-radius:12px;font-weight:700;font-size:1rem;
+    display:inline-flex;align-items:center;justify-content:center;gap:9px;width:100%;
+  }
+  .btn-verde{background:var(--verde);color:#fff}
+  .btn-verde:active{background:#19632f}
+  .btn-borde{background:var(--paper);border:2px solid var(--line);color:var(--ink)}
+  .btn-borde:active{background:var(--panel)}
+  .btn-texto{background:none;color:var(--alerta);font-weight:600;min-height:48px}
+  .btn-ambar{background:var(--ambar);color:#fff}
+  .btn-ambar:active{background:#9c4b08}
+  .btn:disabled{opacity:.45}
+  .btn-fila{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media (max-width:520px){.btn-fila{grid-template-columns:1fr}}
+
+  /* ---------- tarjetas de sesión ---------- */
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
+  .card h3{font-size:1.05rem;font-weight:700;letter-spacing:-0.01em}
+  .card-sub{font-size:0.85rem;color:var(--muted);margin-top:2px}
+  .ses{display:flex;align-items:center;gap:14px;width:100%;text-align:left}
+  .ses-info{flex:1;min-width:0}
+  .ses-fecha{font-size:1.02rem;font-weight:700}
+  .ses-det{font-size:0.84rem;color:var(--muted);margin-top:3px}
+  .ses-pip{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+  .pip-sync{background:var(--verde)}
+  .pip-pend{background:#c98a1a}
+  .pip-local{background:var(--line)}
+  .ses-flecha{color:var(--muted);font-size:1.4rem}
+
+  /* ---------- carga ---------- */
+  .drop{
+    border:2px dashed #b9c5bb;border-radius:14px;padding:34px 18px;text-align:center;
+    background:var(--paper);position:relative;
+  }
+  .drop input{position:absolute;inset:0;opacity:0;width:100%;height:100%}
+  .drop .ic{font-size:2.4rem}
+  .drop b{display:block;font-size:1.1rem;margin-top:8px}
+  .drop small{color:var(--muted)}
+
+  .param{
+    background:var(--paper);border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;display:flex;align-items:center;gap:12px;margin-bottom:10px;
+  }
+  .param-txt{flex:1;min-width:0}
+  .param-txt b{font-size:0.98rem}
+  .param-txt small{display:block;color:var(--muted);font-size:0.84rem}
+  .param input[type=number]{
+    width:62px;padding:9px 4px;text-align:center;border:1px solid var(--line);
+    border-radius:9px;background:var(--paper);font-weight:600;
+  }
+  .sw{width:56px;height:32px;border-radius:16px;background:#ccd5cd;position:relative;flex-shrink:0;transition:background .15s}
+  .sw::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;transition:left .15s;box-shadow:0 1px 3px #0003}
+  .sw[aria-pressed="true"]{background:var(--verde)}
+  .sw[aria-pressed="true"]::after{left:27px}
+
+  .aviso{
+    background:#fdf3e3;border:1px solid #ecd9b0;color:#7a5410;
+    border-radius:12px;padding:12px 14px;font-size:0.9rem;margin-bottom:12px;
+  }
+  .aviso b{display:block;margin-bottom:3px}
+  .aviso.malo{background:var(--alerta-suave);border-color:#efc4c1;color:var(--alerta)}
+  .aviso.bien{background:var(--verde-suave);border-color:#bcd9c5;color:#155f2e}
+
+  .campo{margin-bottom:14px}
+  .campo label{display:block;font-weight:600;font-size:0.92rem;margin-bottom:6px}
+  .campo input[type=text],.campo input[type=url],.campo select{
+    width:100%;min-height:52px;padding:12px 14px;border:1px solid var(--line);
+    border-radius:11px;background:var(--paper);
+  }
+  .campo small{display:block;color:var(--muted);font-size:0.83rem;margin-top:5px}
+
+  /* ---------- buscador y filtros ---------- */
+  .busca{display:flex;gap:10px;margin-top:14px}
+  .busca input{
+    flex:1;min-height:52px;padding:12px 14px;border:1px solid var(--line);
+    border-radius:11px;background:var(--paper);
+  }
+  .filtros{display:flex;gap:8px;margin-top:10px;overflow-x:auto;padding-bottom:2px}
+  .fchip{
+    padding:9px 15px;border-radius:22px;border:1px solid var(--line);background:var(--paper);
+    font-size:0.9rem;font-weight:600;white-space:nowrap;color:var(--muted);
+  }
+  .fchip[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+  /* ---------- tabla de detalle de un chequeo (solo lectura) ---------- */
+  .tabla-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
+  .tabla-datos{width:100%;border-collapse:collapse;font-size:0.86rem;white-space:nowrap}
+  .tabla-datos th,.tabla-datos td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
+  .tabla-datos th{background:var(--panel);font-weight:700;position:sticky;top:0}
+  .tabla-datos tr:last-child td{border-bottom:none}
+  .totales{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px;margin-top:14px;text-align:center}
+  .totales b{display:block;font-size:1.3rem;font-weight:800}
+  .totales span{font-size:0.76rem;color:var(--muted)}
+
+  /* ---------- barra inferior ---------- */
+  .barra{
+    position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--paper);
+    border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+  }
+  .barra-in{max-width:860px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+  .vacio{text-align:center;padding:52px 20px;color:var(--muted)}
+  .vacio .ic{font-size:3rem;display:block;margin-bottom:10px}
+
+  .toast{
+    position:fixed;left:50%;transform:translateX(-50%);bottom:96px;z-index:60;
+    background:var(--ink);color:#fff;padding:13px 20px;border-radius:12px;
+    font-size:0.92rem;font-weight:600;max-width:90%;text-align:center;
+    box-shadow:0 6px 20px #0004;
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .toast{animation:sube .18s ease-out}
+    @keyframes sube{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
+  }
+  .oculto{display:none !important}
+</style>
+</head>
+<body>
+
+<div class="net" id="net"><span class="pip"></span><span id="netTxt">Con internet</span></div>
+
+<div class="topbar">
+  <div class="topbar-in">
+    <button class="icon-btn oculto" id="btnAtras" onclick="irAtras()" aria-label="Volver">←</button>
+    <div style="flex:1;min-width:0">
+      <div class="top-title" id="titulo">Chequeo reproductivo</div>
+      <div class="top-sub" id="subtitulo">La Morelia</div>
+    </div>
+    <button class="icon-btn" id="btnAjustes" onclick="ver('ajustes')" aria-label="Ajustes">⚙</button>
+  </div>
+</div>
+
+<div class="prog-wrap oculto" id="progWrap">
+  <div class="prog-in">
+    <div class="aviso oculto" id="cerradoAviso" style="margin-bottom:10px"></div>
+    <div class="prog-head">
+      <div class="prog-count"><span id="progHecho">0</span><small> de <span id="progTotal">0</span> revisadas</small></div>
+      <div style="font-size:.85rem;color:var(--muted)" id="progDetalle"></div>
+    </div>
+    <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- ================= INICIO ================= -->
+  <section id="v-inicio">
+    <div id="bannerPrep" style="margin-top:16px"></div>
+    <div style="margin:16px 0">
+      <button class="btn btn-verde" onclick="ver('cargar')">＋ Nuevo chequeo</button>
+    </div>
+    <div id="listaSesiones"></div>
+  </section>
+
+  <!-- ================= CARGAR ================= -->
+  <section id="v-cargar" class="oculto">
+    <div class="card">
+      <h3>Archivo de DairyPlan</h3>
+      <div class="card-sub" style="margin-bottom:12px">Exporta el listado del hato en Excel y ábrelo aquí.</div>
+      <div class="drop" id="drop">
+        <input type="file" id="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
+        <span class="ic">📄</span>
+        <b>Elegir archivo</b>
+        <small>Excel de DairyPlan (.xlsx o .xls)</small>
+      </div>
+      <div id="cargaInfo" class="oculto" style="margin-top:12px"></div>
+    </div>
+
+    <div class="card" id="panelParams">
+      <h3>Parámetros de chequeo</h3>
+      <div class="card-sub" style="margin-bottom:12px">Ajústalos si el encargado maneja otros días.</div>
+      <div id="params"></div>
+      <div id="resumenFiltro"></div>
+    </div>
+
+    <div class="btn-fila">
+      <button class="btn btn-borde" onclick="ver('inicio')">Cancelar</button>
+      <button class="btn btn-verde" id="btnCrear" onclick="crearSesion()" disabled>Empezar chequeo</button>
+    </div>
+    <div style="margin:10px 0 40px">
+      <button class="btn btn-borde" id="btnPreparar" onclick="prepararParaTablet()" disabled>📤 Enviar a la tablet</button>
+      <div style="font-size:.85rem;color:var(--muted);margin-top:8px;text-align:center">
+        Deja la lista lista para que el encargado la descargue en la tablet.
+      </div>
+      <div id="prepMsg" style="margin-top:10px"></div>
+    </div>
+  </section>
+
+  <!-- ================= CAMPO ================= -->
+  <section id="v-campo" class="oculto">
+    <div class="busca">
+      <input type="text" id="buscar" inputmode="search" placeholder="Buscar número de animal" oninput="pintarLista()">
+      <button class="icon-btn" onclick="limpiarBusqueda()" aria-label="Limpiar">✕</button>
+    </div>
+    <div class="filtros">
+      <button class="fchip" id="f-todas" aria-pressed="true" onclick="setFiltro('todas')">Todas</button>
+      <button class="fchip" id="f-pend" aria-pressed="false" onclick="setFiltro('pend')">Pendientes</button>
+      <button class="fchip" id="f-prenadas" aria-pressed="false" onclick="setFiltro('prenadas')">Preñadas</button>
+      <button class="fchip" id="f-vacias" aria-pressed="false" onclick="setFiltro('vacias')">Vacías</button>
+      <button class="fchip" id="f-abortos" aria-pressed="false" onclick="setFiltro('abortos')">Abortos</button>
+    </div>
+    <div class="lista" id="lista"></div>
+    <div style="margin:18px 0 10px">
+      <button class="btn btn-borde" id="btnAgregarAnimal" onclick="ver('agregar')">＋ Agregar animal que no está en la lista</button>
+    </div>
+  </section>
+
+  <!-- ================= AGREGAR ================= -->
+  <section id="v-agregar" class="oculto">
+    <div class="card">
+      <h3>Agregar animal</h3>
+      <div class="card-sub" style="margin-bottom:14px">Para vacas que llegaron al corral y no venían en la lista.</div>
+      <div class="campo">
+        <label for="nvNum">Número del animal</label>
+        <input type="text" id="nvNum" inputmode="numeric" autocomplete="off">
+      </div>
+      <div class="campo">
+        <label for="nvEstado">Estado en DairyPlan</label>
+        <input type="text" id="nvEstado" list="estadosLista" autocomplete="off" placeholder="Opcional">
+        <datalist id="estadosLista"></datalist>
+      </div>
+      <div class="campo">
+        <label for="nvNota">Comentario</label>
+        <input type="text" id="nvNota" autocomplete="off" placeholder="Opcional">
+      </div>
+      <div class="btn-fila">
+        <button class="btn btn-borde" onclick="ver('campo')">Cancelar</button>
+        <button class="btn btn-verde" onclick="agregarAnimal()">Agregar</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= AJUSTES ================= -->
+  <section id="v-ajustes" class="oculto">
+    <div class="card">
+      <h3>Hoja de Google</h3>
+      <div class="card-sub" style="margin-bottom:12px">Los chequeos se envían aquí cuando hay internet. Cada envío agrega filas, no borra las anteriores.</div>
+      <div class="campo">
+        <label for="urlSheet">Dirección de envío</label>
+        <input type="url" id="urlSheet" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+        <small>La consigues al publicar el Apps Script. Está explicado en el archivo de instalación.</small>
+      </div>
+      <div class="btn-fila">
+        <button class="btn btn-borde" onclick="probarSheet()">Probar conexión</button>
+        <button class="btn btn-verde" onclick="guardarUrl()">Guardar</button>
+      </div>
+      <div id="ajustesMsg" style="margin-top:12px"></div>
+    </div>
+
+    <div class="card">
+      <h3>Nombre de quien revisa</h3>
+      <div class="campo" style="margin:10px 0 0">
+        <input type="text" id="operario" placeholder="Ej: Don Jairo" autocomplete="off" onchange="guardarOperario()">
+        <small>Queda registrado en cada chequeo enviado.</small>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Estado del dispositivo</h3>
+      <div id="infoAlmacen" class="card-sub" style="margin-top:8px"></div>
+      <div style="margin-top:14px">
+        <button class="btn btn-borde" onclick="sincronizarPendientes(true)">Enviar chequeos pendientes</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Chequeos guardados</h3>
+      <div class="card-sub" style="margin-bottom:6px">Toca uno para ver el detalle, exportarlo o borrarlo.</div>
+      <div id="listaChequeos"></div>
+    </div>
+
+    <div style="margin-bottom:40px">
+      <button class="btn btn-borde" onclick="ver('inicio')">Volver</button>
+    </div>
+  </section>
+
+  <!-- ================= RESUMEN DE SESIÓN ================= -->
+  <section id="v-sesion" class="oculto">
+    <div id="resumenSesion"></div>
+  </section>
+
+</div>
+
+<!-- barra inferior del modo campo -->
+<div class="barra oculto" id="barraCampo">
+  <div class="barra-in">
+    <button class="btn btn-borde" onclick="exportarExcel()">⬇ Excel</button>
+    <button class="btn btn-verde" id="btnEnviar" onclick="enviarSesion()">Guardar y enviar</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* =========================================================
+   1. Almacenamiento local (IndexedDB)
+   ========================================================= */
+const DB_NOMBRE = 'chequeo-repro';
+const DB_VER = 1;
+let _db = null;
+
+function abrirDB(){
+  return new Promise((res, rej) => {
+    if (_db) return res(_db);
+    const req = indexedDB.open(DB_NOMBRE, DB_VER);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('sesiones')) db.createObjectStore('sesiones', {keyPath:'id'});
+      if (!db.objectStoreNames.contains('config')) db.createObjectStore('config', {keyPath:'clave'});
+    };
+    req.onsuccess = e => { _db = e.target.result; res(_db); };
+    req.onerror = () => rej(req.error);
+  });
+}
+function tx(store, modo){
+  return abrirDB().then(db => db.transaction(store, modo).objectStore(store));
+}
+function dbGuardar(store, obj){
+  return tx(store,'readwrite').then(st => new Promise((res,rej)=>{
+    const r = st.put(obj); r.onsuccess = () => res(obj); r.onerror = () => rej(r.error);
+  }));
+}
+function dbLeer(store, clave){
+  return tx(store,'readonly').then(st => new Promise((res,rej)=>{
+    const r = st.get(clave); r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error);
+  }));
+}
+function dbTodo(store){
+  return tx(store,'readonly').then(st => new Promise((res,rej)=>{
+    const r = st.getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error);
+  }));
+}
+function dbBorrar(store, clave){
+  return tx(store,'readwrite').then(st => new Promise((res,rej)=>{
+    const r = st.delete(clave); r.onsuccess = () => res(); r.onerror = () => rej(r.error);
+  }));
+}
+
+/* =========================================================
+   2. Estado en memoria
+   ========================================================= */
+let sesion = null;          // sesión abierta
+let sesiones = [];          // historial
+let config = {urlSheet:'', operario:''};
+let vista = 'inicio';
+let filtro = 'todas';
+let pila = [];              // navegación hacia atrás
+let borrador = null;        // archivo cargado, antes de crear la sesión
+
+const PARAMS_DEF = [
+  {id:1, estados:['alta','pront','abort','vacia'], campo:'DEL', op:'>',    val:21,  texto:'Recién paridas y vacías'},
+  {id:2, estados:['insem'],                        campo:'DUS', op:'>',    val:27,  texto:'Inseminadas sin confirmar'},
+  {id:3, estados:['pren'],                         campo:'DUS', op:'<',    val:60,  texto:'Preñez temprana'},
+  {id:4, estados:['pren'],                         campo:'DUS', op:'entre',min:91, max:104, texto:'Confirmación de preñez'},
+  {id:5, estados:['pren'],                         campo:'DUS', op:'entre',min:204,max:240, texto:'Control antes del secado'}
+];
+let params = JSON.parse(JSON.stringify(PARAMS_DEF)).map(p => (p.activo = true, p));
+
+/* =========================================================
+   3. Utilidades
+   ========================================================= */
+// Quita tildes y la ñ para que VACÍA, VACIA, PREÑ y PREÑADA se comparen igual.
+function norm(v){
+  if (v === null || v === undefined) return '';
+  return String(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
+}
+// El botón de Aborto solo debe verse en animales cuyo estado (el STATUS de
+// DairyPlan) empieza por PREÑ — mismo criterio "empieza por" que ya usan
+// las reglas de parámetros (ver coincideEstado).
+function esPrenada(a){
+  return norm(a.estado).startsWith('pren');
+}
+function numero(v){
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  const n = parseFloat(String(v).replace(/\s/g,'').replace(',','.'));
+  return isNaN(n) ? null : n;
+}
+// Lee un input numérico respetando el cero (el bug clásico de || valorPorDefecto)
+function leerNum(el, defecto){
+  const n = parseFloat(el.value);
+  return Number.isFinite(n) ? n : defecto;
+}
+function esc(s){
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function muestra(v){
+  if (v instanceof Date && !isNaN(v)) {
+    return String(v.getDate()).padStart(2,'0')+'/'+String(v.getMonth()+1).padStart(2,'0')+'/'+v.getFullYear();
+  }
+  return v === null || v === undefined ? '' : String(v);
+}
+function fechaLarga(iso){
+  try {
+    return new Date(iso).toLocaleDateString('es-CO',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  } catch(e){ return iso; }
+}
+function fechaCorta(iso){
+  const d = new Date(iso);
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+}
+let _toastT = null;
+function toast(msg){
+  const v = document.getElementById('_toast');
+  if (v) v.remove();
+  const el = document.createElement('div');
+  el.className = 'toast'; el.id = '_toast'; el.textContent = msg;
+  el.setAttribute('role','status');
+  document.body.appendChild(el);
+  clearTimeout(_toastT);
+  _toastT = setTimeout(() => el.remove(), 2600);
+}
+
+/* =========================================================
+   4. Navegación
+   ========================================================= */
+function ver(v, sinPila){
+  if (!sinPila && v !== vista) pila.push(vista);
+  vista = v;
+  ['inicio','cargar','campo','agregar','ajustes','sesion'].forEach(n => {
+    document.getElementById('v-'+n).classList.toggle('oculto', n !== v);
+  });
+  document.getElementById('btnAtras').classList.toggle('oculto', v === 'inicio');
+  document.getElementById('btnAjustes').classList.toggle('oculto', v !== 'inicio');
+  document.getElementById('progWrap').classList.toggle('oculto', v !== 'campo');
+  document.getElementById('barraCampo').classList.toggle('oculto', v !== 'campo');
+
+  const t = document.getElementById('titulo'), s = document.getElementById('subtitulo');
+  if (v === 'inicio'){ t.textContent = 'Chequeo reproductivo'; s.textContent = 'La Morelia'; }
+  else if (v === 'cargar'){ t.textContent = 'Nuevo chequeo'; s.textContent = 'Cargar y filtrar'; }
+  else if (v === 'campo'){ t.textContent = sesion ? sesion.nombre : 'Chequeo'; s.textContent = (sesion && sesion.enviado) ? 'Chequeo cerrado · solo lectura' : 'Toca preñada o vacía en cada animal'; }
+  else if (v === 'agregar'){ t.textContent = 'Agregar animal'; s.textContent = ''; }
+  else if (v === 'ajustes'){ t.textContent = 'Ajustes'; s.textContent = ''; }
+  else if (v === 'sesion'){ t.textContent = 'Chequeo guardado'; s.textContent = ''; }
+
+  window.scrollTo(0,0);
+  if (v === 'inicio'){ pintarSesiones(); revisarPreparados(); }
+  if (v === 'ajustes') pintarAjustes();
+  if (v === 'agregar') prepararAgregar();
+}
+function irAtras(){
+  const prev = pila.pop() || 'inicio';
+  ver(prev, true);
+}
+
+/* =========================================================
+   5. Carga del Excel de DairyPlan
+   ========================================================= */
+const COLS_ID = ['animal','numero','num','nro','no','n','id','crotal','arete','vaca','codigo','identificacion'];
+
+document.getElementById('file').addEventListener('change', e => {
+  if (e.target.files && e.target.files[0]) leerArchivo(e.target.files[0]);
+});
+const drop = document.getElementById('drop');
+drop.addEventListener('dragover', e => e.preventDefault());
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) leerArchivo(e.dataTransfer.files[0]);
+});
+
+function leerArchivo(file){
+  const info = document.getElementById('cargaInfo');
+  info.classList.remove('oculto');
+  info.innerHTML = '<div class="aviso">Leyendo el archivo…</div>';
+  const fr = new FileReader();
+  fr.onerror = () => { info.innerHTML = '<div class="aviso malo"><b>No se pudo leer el archivo</b>Vuelve a exportarlo desde DairyPlan e inténtalo otra vez.</div>'; };
+  fr.onload = ev => {
+    try {
+      const wb = XLSX.read(new Uint8Array(ev.target.result), {type:'array', cellDates:true});
+      const hoja = wb.Sheets[wb.SheetNames[0]];
+      const filas = XLSX.utils.sheet_to_json(hoja, {header:1, raw:true, cellDates:true, defval:''});
+      const conDatos = filas.filter(f => f.some(c => c !== '' && c !== null && c !== undefined));
+      if (conDatos.length < 2) throw new Error('vacio');
+
+      const heads = conDatos[0].map(h => (h === null || h === undefined) ? '' : String(h).trim());
+      const cuerpo = conDatos.slice(1);
+
+      const iStatus = heads.findIndex(h => norm(h) === 'status' || norm(h) === 'estado');
+      const iDel = heads.findIndex(h => norm(h) === 'del');
+      const iDus = heads.findIndex(h => norm(h) === 'dus');
+      const faltan = [];
+      if (iStatus < 0) faltan.push('STATUS');
+      if (iDel < 0) faltan.push('DEL');
+      if (iDus < 0) faltan.push('DUS');
+      if (faltan.length){
+        info.innerHTML = '<div class="aviso malo"><b>Faltan columnas en el archivo</b>No encontré ' + esc(faltan.join(', ')) +
+          '. El listado de DairyPlan debe incluirlas. Columnas encontradas: ' + esc(heads.filter(Boolean).join(', ')) + '.</div>';
+        document.getElementById('btnCrear').disabled = true;
+        borrador = null;
+        return;
+      }
+
+      let iId = -1;
+      for (const c of COLS_ID){
+        iId = heads.findIndex(h => norm(h) === c);
+        if (iId >= 0) break;
+      }
+      if (iId < 0) iId = 0;
+
+      borrador = {archivo:file.name, heads, cuerpo, iStatus, iDel, iDus, iId};
+      info.innerHTML = '<div class="aviso bien"><b>' + esc(file.name) + '</b>' + cuerpo.length + ' animales en el archivo.</div>';
+      aplicarFiltro();
+    } catch(err){
+      info.innerHTML = '<div class="aviso malo"><b>El archivo no se pudo abrir</b>Debe ser el Excel que exporta DairyPlan (.xlsx o .xls), sin filas de título encima de los encabezados.</div>';
+      document.getElementById('btnCrear').disabled = true;
+      borrador = null;
+    }
+  };
+  fr.readAsArrayBuffer(file);
+}
+
+/* ---- parámetros ---- */
+function pintarParams(){
+  const cont = document.getElementById('params');
+  cont.innerHTML = params.map(p => {
+    const estados = p.estados.map(e => e.toUpperCase()).join(' · ');
+    let inputs;
+    if (p.op === 'entre'){
+      inputs = '<input type="number" id="pmin'+p.id+'" value="'+p.min+'" min="0" inputmode="numeric" aria-label="mínimo">' +
+               '<span style="color:var(--muted)">a</span>' +
+               '<input type="number" id="pmax'+p.id+'" value="'+p.max+'" min="0" inputmode="numeric" aria-label="máximo">';
+    } else {
+      inputs = '<span style="color:var(--muted)">'+p.op+'</span>' +
+               '<input type="number" id="pval'+p.id+'" value="'+p.val+'" min="0" inputmode="numeric" aria-label="valor">';
+    }
+    return '<div class="param">' +
+      '<div class="param-txt"><b>'+esc(p.texto)+'</b><small>'+esc(estados)+' · '+p.campo+'</small></div>' +
+      '<div style="display:flex;align-items:center;gap:6px">'+inputs+'</div>' +
+      '<button class="sw" aria-pressed="'+(p.activo?'true':'false')+'" onclick="alternarParam('+p.id+')" aria-label="Activar '+esc(p.texto)+'"></button>' +
+      '</div>';
+  }).join('');
+  params.forEach(p => {
+    const ids = p.op === 'entre' ? ['pmin'+p.id,'pmax'+p.id] : ['pval'+p.id];
+    ids.forEach(i => {
+      const el = document.getElementById(i);
+      if (el) el.addEventListener('input', () => { leerParams(); aplicarFiltro(); });
+    });
+  });
+}
+function alternarParam(id){
+  const p = params.find(x => x.id === id);
+  p.activo = !p.activo;
+  pintarParams();
+  aplicarFiltro();
+}
+function leerParams(){
+  params.forEach(p => {
+    if (p.op === 'entre'){
+      const a = document.getElementById('pmin'+p.id), b = document.getElementById('pmax'+p.id);
+      if (a) p.min = leerNum(a, p.min);
+      if (b) p.max = leerNum(b, p.max);
+    } else {
+      const a = document.getElementById('pval'+p.id);
+      if (a) p.val = leerNum(a, p.val);
+    }
+  });
+}
+function coincideEstado(estadoNorm, lista){
+  return lista.some(e => estadoNorm.startsWith(e));
+}
+function aplicarFiltro(){
+  const res = document.getElementById('resumenFiltro');
+  if (!borrador){ res.innerHTML = ''; return; }
+  leerParams();
+
+  const sel = [];
+  const sinRegla = {};
+  for (const fila of borrador.cuerpo){
+    const est = norm(fila[borrador.iStatus]);
+    if (!est) continue;
+    const del = numero(fila[borrador.iDel]);
+    const dus = numero(fila[borrador.iDus]);
+    const motivos = [];
+    for (const p of params){
+      if (!p.activo) continue;
+      if (!coincideEstado(est, p.estados)) continue;
+      const v = p.campo === 'DEL' ? del : dus;
+      if (v === null) continue;
+      let ok = false;
+      if (p.op === '>') ok = v > p.val;
+      else if (p.op === '<') ok = v < p.val;
+      else if (p.op === 'entre') ok = v >= p.min && v <= p.max;
+      if (ok) motivos.push('P'+p.id);
+    }
+    if (motivos.length) sel.push({fila, motivos});
+    else {
+      const cubierto = params.some(p => coincideEstado(est, p.estados));
+      if (!cubierto) sinRegla[String(fila[borrador.iStatus]).trim()] = (sinRegla[String(fila[borrador.iStatus]).trim()] || 0) + 1;
+    }
+  }
+  borrador.sel = sel;
+
+  let html = '<div class="aviso ' + (sel.length ? 'bien' : 'malo') + '"><b>' + sel.length +
+    ' animales para chequear</b>' + (sel.length ? 'De ' + borrador.cuerpo.length + ' animales del hato.' :
+    'Ningún animal cumple los parámetros activos. Revisa los valores o los estados del archivo.') + '</div>';
+  const sr = Object.keys(sinRegla);
+  if (sr.length){
+    html += '<div class="aviso"><b>Estados sin ninguna regla</b>' +
+      sr.map(k => esc(k) + ' (' + sinRegla[k] + ')').join(', ') +
+      '. Esos animales nunca van a salir en la lista. Si alguno debería salir, avísale a Andrés.</div>';
+  }
+  res.innerHTML = html;
+  document.getElementById('btnCrear').disabled = sel.length === 0;
+  document.getElementById('btnPreparar').disabled = sel.length === 0;
+}
+
+/* =========================================================
+   6. Crear la sesión de campo
+   ========================================================= */
+// orden descendente por estado, y dentro de cada estado por número
+function ordenar(animales){
+  animales.sort((a,b) => {
+    const ea = norm(a.estado), eb = norm(b.estado);
+    if (ea !== eb) return eb.localeCompare(ea, 'es');
+    const na = numero(a.num), nb = numero(b.num);
+    if (na !== null && nb !== null) return na - nb;
+    return String(a.num).localeCompare(String(b.num), 'es');
+  });
+  return animales;
+}
+function animalesDelBorrador(){
+  return ordenar(borrador.sel.map((s, i) => {
+    const datos = {};
+    borrador.heads.forEach((h, j) => { if (h) datos[h] = muestra(s.fila[j]); });
+    return {
+      id: 'a' + i + '_' + Math.random().toString(36).slice(2,7),
+      num: muestra(s.fila[borrador.iId]),
+      estado: muestra(s.fila[borrador.iStatus]),
+      del: muestra(s.fila[borrador.iDel]),
+      dus: muestra(s.fila[borrador.iDus]),
+      motivos: s.motivos,
+      datos,
+      resultado: null,
+      comentario: '',
+      agregado: false,
+      hora: null
+    };
+  }));
+}
+
+function crearSesion(){
+  if (!borrador || !borrador.sel || !borrador.sel.length) return;
+  const ahora = new Date();
+  const animales = animalesDelBorrador();
+
+  sesion = {
+    id: 'ses_' + ahora.getTime(),
+    creado: ahora.toISOString(),
+    nombre: 'Chequeo ' + fechaCorta(ahora.toISOString()),
+    archivo: borrador.archivo,
+    heads: borrador.heads.filter(Boolean),
+    colId: borrador.heads[borrador.iId] || '',
+    colStatus: borrador.heads[borrador.iStatus] || '',
+    colDel: borrador.heads[borrador.iDel] || '',
+    colDus: borrador.heads[borrador.iDus] || '',
+    operario: config.operario || '',
+    animales,
+    enviado: false,
+    enviadoEn: null
+  };
+  guardarSesion().then(() => {
+    filtro = 'todas';
+    setFiltro('todas');
+    document.getElementById('buscar').value = '';
+    ver('campo');
+    pintarLista();
+  });
+}
+
+function guardarSesion(){
+  if (!sesion) return Promise.resolve();
+  sesion.actualizado = new Date().toISOString();
+  return dbGuardar('sesiones', sesion).then(() => cargarSesiones()).catch(err => {
+    toast('No se pudo guardar en el dispositivo');
+    console.error(err);
+  });
+}
+
+function cargarSesiones(){
+  return dbTodo('sesiones').then(list => {
+    sesiones = list.sort((a,b) => (b.creado || '').localeCompare(a.creado || ''));
+    return sesiones;
+  });
+}
+
+/* =========================================================
+   7. Modo campo
+   ========================================================= */
+function setFiltro(f){
+  filtro = f;
+  const mapa = {todas:'f-todas', pend:'f-pend', prenadas:'f-prenadas', vacias:'f-vacias', abortos:'f-abortos'};
+  Object.keys(mapa).forEach(k => {
+    document.getElementById(mapa[k]).setAttribute('aria-pressed', k === f ? 'true' : 'false');
+  });
+  pintarLista();
+}
+function limpiarBusqueda(){
+  document.getElementById('buscar').value = '';
+  pintarLista();
+}
+function animalesVisibles(){
+  if (!sesion) return [];
+  const q = norm(document.getElementById('buscar').value);
+  return sesion.animales.filter(a => {
+    if (filtro === 'pend' && a.resultado) return false;
+    if (filtro === 'prenadas' && a.resultado !== 'PREÑADA') return false;
+    if (filtro === 'vacias' && a.resultado !== 'VACIA') return false;
+    if (filtro === 'abortos' && a.resultado !== 'ABORTO') return false;
+    if (q && !norm(a.num).includes(q) && !norm(a.estado).includes(q)) return false;
+    return true;
+  });
+}
+// Un chequeo cerrado (ya enviado a la hoja de Google) es de solo lectura,
+// para no modificarlo por accidente. Se reabre con el botón de la barra.
+function botonResultado(a, valor, clase, icono, etiqueta, cerrado){
+  const activo = a.resultado === valor;
+  const accion = cerrado ? ' disabled' : ' onclick="marcar(\'' + a.id + '\',\'' + valor + '\')"';
+  return '<button class="a-btn ' + clase + '" aria-pressed="' + activo + '"' + accion + '>' +
+    '<span class="mk">' + icono + '</span>' + etiqueta + '</button>';
+}
+function pintarLista(){
+  if (!sesion) return;
+  const cont = document.getElementById('lista');
+  const vis = animalesVisibles();
+  const cerrado = !!sesion.enviado;
+  actualizarProgreso();
+  actualizarEstadoCierre();
+
+  if (!vis.length){
+    cont.innerHTML = '<div class="vacio"><span class="ic">🔎</span>' +
+      (filtro === 'pend' ? 'No quedan animales pendientes.' : 'Ningún animal con esa búsqueda.') + '</div>';
+    return;
+  }
+
+  let html = '', estadoPrev = null;
+  for (const a of vis){
+    const est = a.estado || 'Sin estado';
+    if (est !== estadoPrev && !document.getElementById('buscar').value){
+      html += '<div class="grupo">' + esc(est) + '</div>';
+      estadoPrev = est;
+    }
+    const cls = a.resultado === 'PREÑADA' ? ' hecho-p' : (a.resultado === 'VACIA' ? ' hecho-v' : (a.resultado === 'ABORTO' ? ' hecho-a' : ''));
+    html += '<article class="animal' + cls + '" id="an_' + a.id + '">' +
+      '<div class="a-head">' +
+        '<div class="a-num">' + esc(a.num || '—') + '</div>' +
+        '<div class="a-meta">' +
+          (a.agregado ? '<span class="chip nuevo">Agregado en campo</span>' : '<span class="chip estado">' + esc(a.estado) + '</span>') +
+          (a.del !== '' && a.del !== undefined ? '<span class="chip">DEL ' + esc(a.del) + '</span>' : '') +
+          (a.dus !== '' && a.dus !== undefined ? '<span class="chip">DUS ' + esc(a.dus) + '</span>' : '') +
+          a.motivos.map(m => '<span class="chip param">' + esc(m) + '</span>').join('') +
+        '</div>' +
+      '</div>' +
+      '<div class="a-btns">' +
+        botonResultado(a, 'PREÑADA', 'p', '●', 'Preñada', cerrado) +
+        botonResultado(a, 'VACIA', 'v', '●', 'Vacía', cerrado) +
+        (esPrenada(a) ? botonResultado(a, 'ABORTO', 'a', '◆', 'Aborto', cerrado) : '') +
+      '</div>' +
+      '<div class="a-extra">' +
+        '<textarea class="a-nota' + (a.comentario ? ' tiene' : '') + '" rows="1" placeholder="Comentario" ' +
+          (cerrado ? 'readonly ' : '') +
+          'oninput="anotar(\'' + a.id + '\', this.value)">' + esc(a.comentario) + '</textarea>' +
+      '</div>' +
+      (a.agregado ? '' : '<button class="ver-mas" onclick="verDatos(\'' + a.id + '\', this)">Ver todos los datos</button>') +
+      '<div class="a-datos oculto" id="dt_' + a.id + '"></div>' +
+    '</article>';
+  }
+  cont.innerHTML = html;
+}
+// Franja de "cerrado", botón de agregar animal, y el botón grande de la
+// barra inferior (Guardar y enviar ↔ Reabrir para corregir).
+function actualizarEstadoCierre(){
+  if (!sesion) return;
+  const cerrado = !!sesion.enviado;
+
+  const aviso = document.getElementById('cerradoAviso');
+  if (aviso){
+    aviso.classList.toggle('oculto', !cerrado);
+    if (cerrado){
+      aviso.innerHTML = '<b>🔒 Chequeo cerrado</b>Se envió a la hoja de Google el ' +
+        esc(fechaLarga(sesion.enviadoEn || sesion.creado)) + '. Toca «Reabrir para corregir» para modificarlo.';
+    }
+  }
+
+  const btnAg = document.getElementById('btnAgregarAnimal');
+  if (btnAg) btnAg.classList.toggle('oculto', cerrado);
+
+  const btnEnviar = document.getElementById('btnEnviar');
+  if (btnEnviar){
+    if (cerrado){
+      btnEnviar.textContent = 'Reabrir para corregir';
+      btnEnviar.className = 'btn btn-ambar';
+      btnEnviar.onclick = reabrirSesion;
+    } else {
+      btnEnviar.textContent = 'Guardar y enviar';
+      btnEnviar.className = 'btn btn-verde';
+      btnEnviar.onclick = enviarSesion;
+    }
+  }
+}
+function reabrirSesion(){
+  if (!sesion || !sesion.enviado) return;
+  const ok = confirm('Vas a reabrir este chequeo para corregirlo. Al volver a enviarlo, se van a reemplazar las filas de este chequeo en la hoja de Google. ¿Continuar?');
+  if (!ok) return;
+  sesion.enviado = false;
+  sesion.reabierto = true;
+  sesion.reabiertoEn = new Date().toISOString();
+  guardarSesion().then(() => {
+    if (vista === 'campo') ver('campo', true); // refresca título/subtítulo
+    pintarLista();
+    toast('Chequeo reabierto. Ya puedes corregirlo.');
+  });
+}
+function actualizarProgreso(){
+  if (!sesion) return;
+  const tot = sesion.animales.length;
+  const hechas = sesion.animales.filter(a => a.resultado).length;
+  const pren = sesion.animales.filter(a => a.resultado === 'PREÑADA').length;
+  const vac = sesion.animales.filter(a => a.resultado === 'VACIA').length;
+  const abo = sesion.animales.filter(a => a.resultado === 'ABORTO').length;
+  document.getElementById('progHecho').textContent = hechas;
+  document.getElementById('progTotal').textContent = tot;
+  document.getElementById('progFill').style.width = (tot ? (hechas/tot*100) : 0) + '%';
+  document.getElementById('progDetalle').textContent = pren + ' preñadas · ' + vac + ' vacías · ' + abo + ' abortos';
+}
+function buscarAnimal(id){ return sesion ? sesion.animales.find(a => a.id === id) : null; }
+
+function marcar(id, valor){
+  if (sesion && sesion.enviado) return; // cerrado: de solo lectura hasta que se reabra
+  const a = buscarAnimal(id);
+  if (!a) return;
+  a.resultado = (a.resultado === valor) ? null : valor;
+  a.hora = a.resultado ? new Date().toISOString() : null;
+  sesion.enviado = false;
+  guardarSesion();
+  // repinta solo esta tarjeta si el filtro no la va a mover
+  if (filtro === 'todas'){
+    const el = document.getElementById('an_'+id);
+    if (el){
+      el.className = 'animal' + (a.resultado === 'PREÑADA' ? ' hecho-p' : (a.resultado === 'VACIA' ? ' hecho-v' : (a.resultado === 'ABORTO' ? ' hecho-a' : '')));
+      const bp = el.querySelector('.a-btn.p'), bv = el.querySelector('.a-btn.v'), ba = el.querySelector('.a-btn.a');
+      if (bp) bp.setAttribute('aria-pressed', String(a.resultado === 'PREÑADA'));
+      if (bv) bv.setAttribute('aria-pressed', String(a.resultado === 'VACIA'));
+      if (ba) ba.setAttribute('aria-pressed', String(a.resultado === 'ABORTO'));
+    }
+    actualizarProgreso();
+  } else {
+    pintarLista();
+  }
+}
+let _notaT = null;
+function anotar(id, txt){
+  if (sesion && sesion.enviado) return; // cerrado: de solo lectura hasta que se reabra
+  const a = buscarAnimal(id);
+  if (!a) return;
+  a.comentario = txt;
+  sesion.enviado = false;
+  clearTimeout(_notaT);
+  _notaT = setTimeout(guardarSesion, 400);
+}
+function verDatos(id, btn){
+  const a = buscarAnimal(id);
+  const cont = document.getElementById('dt_'+id);
+  if (!a || !cont) return;
+  if (!cont.classList.contains('oculto')){
+    cont.classList.add('oculto'); btn.textContent = 'Ver todos los datos'; return;
+  }
+  cont.innerHTML = Object.keys(a.datos).map(k =>
+    '<div><span>' + esc(k) + '</span><span>' + esc(a.datos[k]) + '</span></div>').join('');
+  cont.classList.remove('oculto');
+  btn.textContent = 'Ocultar datos';
+}
+
+/* ---- agregar animal en campo ---- */
+function prepararAgregar(){
+  const dl = document.getElementById('estadosLista');
+  const vistos = {};
+  if (sesion) sesion.animales.forEach(a => { if (a.estado) vistos[a.estado] = 1; });
+  dl.innerHTML = Object.keys(vistos).map(e => '<option value="'+esc(e)+'">').join('');
+  document.getElementById('nvNum').value = '';
+  document.getElementById('nvEstado').value = '';
+  document.getElementById('nvNota').value = '';
+  setTimeout(() => document.getElementById('nvNum').focus(), 100);
+}
+function agregarAnimal(){
+  if (sesion && sesion.enviado){ toast('Este chequeo está cerrado. Reábrelo para agregar animales.'); ver('campo'); return; }
+  const num = document.getElementById('nvNum').value.trim();
+  if (!num){ toast('Escribe el número del animal'); return; }
+  const est = document.getElementById('nvEstado').value.trim();
+  const nota = document.getElementById('nvNota').value.trim();
+  sesion.animales.unshift({
+    id: 'add_' + Date.now(),
+    num, estado: est || 'AGREGADO', del:'', dus:'',
+    motivos: [], datos: {}, resultado:null, comentario:nota, agregado:true, hora:null
+  });
+  sesion.enviado = false;
+  guardarSesion().then(() => {
+    filtro = 'todas'; setFiltro('todas');
+    document.getElementById('buscar').value = '';
+    ver('campo', true);
+    pila = pila.filter(p => p !== 'agregar');
+    pintarLista();
+    toast('Animal ' + num + ' agregado');
+  });
+}
+
+/* =========================================================
+   7b. Preparar en el computador / recoger en la tablet
+   ========================================================= */
+function pedir(cuerpo){
+  if (!config.urlSheet) return Promise.reject(new Error('sin-url'));
+  return fetch(config.urlSheet, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(cuerpo)
+  }).then(r => {
+    if (!r.ok) throw new Error('http-' + r.status);
+    return r.text();
+  }).then(t => {
+    let j;
+    try { j = JSON.parse(t); } catch(e){ throw new Error('respuesta-rara'); }
+    if (!j.ok) throw new Error(j.error || 'error');
+    return j;
+  });
+}
+
+function prepararParaTablet(){
+  const msg = document.getElementById('prepMsg');
+  if (!borrador || !borrador.sel || !borrador.sel.length) return;
+  if (!config.urlSheet){
+    msg.innerHTML = '<div class="aviso malo"><b>Falta la hoja de Google</b>Configúrala en el engranaje ⚙ para poder mandar la lista a la tablet.</div>';
+    return;
+  }
+  if (!navigator.onLine){
+    msg.innerHTML = '<div class="aviso malo"><b>No hay internet</b>Esta parte sí necesita conexión, porque la lista viaja por la hoja de Google.</div>';
+    return;
+  }
+  const btn = document.getElementById('btnPreparar');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  msg.innerHTML = '<div class="aviso">Enviando la lista…</div>';
+
+  const ahora = new Date();
+  const animales = animalesDelBorrador();
+  const cuerpo = {
+    accion: 'preparar',
+    sesionId: 'prep_' + ahora.getTime(),
+    fecha: ahora.toISOString(),
+    archivo: borrador.archivo || '',
+    meta: {
+      heads: borrador.heads.filter(Boolean),
+      colId: borrador.heads[borrador.iId] || '',
+      colStatus: borrador.heads[borrador.iStatus] || '',
+      colDel: borrador.heads[borrador.iDel] || '',
+      colDus: borrador.heads[borrador.iDus] || ''
+    },
+    animales: animales.map(a => ([
+      a.num, a.estado, a.del, a.dus, a.motivos.join(', '), JSON.stringify(a.datos)
+    ]))
+  };
+
+  pedir(cuerpo).then(() => {
+    msg.innerHTML = '<div class="aviso bien"><b>Lista enviada</b>' + animales.length +
+      ' animales. En la tablet, con internet, aparece arriba el aviso para descargarla.</div>';
+  }).catch(e => {
+    console.error(e);
+    msg.innerHTML = '<div class="aviso malo"><b>No se pudo enviar</b>Revisa la conexión con la hoja en el engranaje ⚙.</div>';
+  }).then(() => {
+    btn.disabled = false; btn.textContent = '📤 Enviar a la tablet';
+  });
+}
+
+let preparados = [];
+function revisarPreparados(){
+  const cont = document.getElementById('bannerPrep');
+  if (!config.urlSheet || !navigator.onLine){ cont.innerHTML = ''; return; }
+  pedir({accion:'pendientes'}).then(j => {
+    preparados = j.pendientes || [];
+    if (!preparados.length){ cont.innerHTML = ''; return; }
+    cont.innerHTML = preparados.map(p =>
+      '<div class="aviso bien" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+        '<div style="flex:1;min-width:180px"><b>Chequeo preparado</b>' +
+        esc(fechaCorta(p.fecha)) + ' · ' + p.animales + ' animales</div>' +
+        '<button class="btn btn-verde" style="width:auto" onclick="descargarPreparado(\'' + esc(p.sesionId) + '\')">Descargar</button>' +
+      '</div>').join('');
+  }).catch(e => { cont.innerHTML = ''; });
+}
+
+function descargarPreparado(id){
+  const cont = document.getElementById('bannerPrep');
+  cont.innerHTML = '<div class="aviso">Descargando la lista…</div>';
+  pedir({accion:'traer', sesionId:id}).then(j => {
+    const meta = j.meta || {};
+    const animales = ordenar((j.animales || []).map((f, i) => {
+      let datos = {};
+      try { datos = JSON.parse(f[5] || '{}'); } catch(e){ datos = {}; }
+      return {
+        id: 'p' + i + '_' + Math.random().toString(36).slice(2,7),
+        num: String(f[0] === null || f[0] === undefined ? '' : f[0]),
+        estado: String(f[1] || ''),
+        del: String(f[2] === null || f[2] === undefined ? '' : f[2]),
+        dus: String(f[3] === null || f[3] === undefined ? '' : f[3]),
+        motivos: String(f[4] || '').split(',').map(s => s.trim()).filter(Boolean),
+        datos, resultado:null, comentario:'', agregado:false, hora:null
+      };
+    }));
+    if (!animales.length) throw new Error('vacio');
+
+    sesion = {
+      id: 'ses_' + Date.now(),
+      creado: j.fecha || new Date().toISOString(),
+      nombre: 'Chequeo ' + fechaCorta(j.fecha || new Date().toISOString()),
+      archivo: j.archivo || '',
+      heads: meta.heads || [],
+      colId: meta.colId || '', colStatus: meta.colStatus || '',
+      colDel: meta.colDel || '', colDus: meta.colDus || '',
+      operario: config.operario || '',
+      preparadoId: id,
+      animales,
+      enviado:false, enviadoEn:null
+    };
+    return guardarSesion().then(() => {
+      pedir({accion:'recogido', sesionId:id}).catch(()=>{});
+      preparados = preparados.filter(p => p.sesionId !== id);
+      filtro = 'todas'; setFiltro('todas');
+      document.getElementById('buscar').value = '';
+      ver('campo');
+      pintarLista();
+      toast(animales.length + ' animales listos para chequear');
+    });
+  }).catch(e => {
+    console.error(e);
+    cont.innerHTML = '<div class="aviso malo"><b>No se pudo descargar</b>Revisa el internet e inténtalo otra vez.</div>';
+  });
+}
+
+/* =========================================================
+   8. Historial
+   ========================================================= */
+function pintarSesiones(){
+  const cont = document.getElementById('listaSesiones');
+  if (!sesiones.length){
+    cont.innerHTML = '<div class="vacio"><span class="ic">🐄</span>Todavía no hay chequeos.<br>Toca <b>Nuevo chequeo</b> y carga el Excel de DairyPlan.</div>';
+    return;
+  }
+  cont.innerHTML = sesiones.map(s => {
+    const hechas = s.animales.filter(a => a.resultado).length;
+    const pren = s.animales.filter(a => a.resultado === 'PREÑADA').length;
+    const vac = s.animales.filter(a => a.resultado === 'VACIA').length;
+    const abo = s.animales.filter(a => a.resultado === 'ABORTO').length;
+    const pip = s.enviado ? 'pip-sync' : (hechas ? 'pip-pend' : 'pip-local');
+    const estado = s.enviado ? 'Enviado' : (hechas === s.animales.length && hechas > 0 ? 'Sin enviar' : 'En curso');
+    return '<div class="card" style="padding:12px 14px">' +
+      '<button class="ses" onclick="abrirSesion(\'' + s.id + '\')">' +
+        '<span class="ses-pip ' + pip + '"></span>' +
+        '<span class="ses-info">' +
+          '<span class="ses-fecha">' + esc(fechaLarga(s.creado)) + '</span>' +
+          '<span class="ses-det">' + hechas + ' de ' + s.animales.length + ' revisadas · ' + pren + ' preñadas · ' + vac + ' vacías · ' + abo + ' abortos · ' + estado + '</span>' +
+        '</span>' +
+        '<span class="ses-flecha">›</span>' +
+      '</button></div>';
+  }).join('');
+}
+function abrirSesion(id){
+  const s = sesiones.find(x => x.id === id);
+  if (!s) return;
+  sesion = s;
+  filtro = 'todas'; setFiltro('todas');
+  document.getElementById('buscar').value = '';
+  ver('campo');
+  pintarLista();
+}
+
+/* =========================================================
+   9. Exportar e enviar
+   ========================================================= */
+// s es opcional: por defecto exporta la sesión abierta en modo campo,
+// pero la vista de detalle (solo lectura) puede pasar cualquier otra.
+function filasExport(s){
+  s = s || sesion;
+  const cols = s.heads.slice();
+  const cab = cols.concat(['PARAMETRO','RESULTADO','COMENTARIO','FECHA CHEQUEO','REVISADO POR','REABIERTO']);
+  const fecha = fechaCorta(s.creado);
+  const filas = [cab];
+  for (const a of s.animales){
+    const f = cols.map(c => {
+      if (a.datos && a.datos[c] !== undefined && a.datos[c] !== '') return a.datos[c];
+      if (c === s.colId) return a.num;
+      if (c === s.colStatus || norm(c) === 'status' || norm(c) === 'estado') return a.estado;
+      if (c === s.colDel) return a.del;
+      if (c === s.colDus) return a.dus;
+      return '';
+    });
+    // convierte a número lo que sea numérico, para que Excel lo ordene bien
+    const fNum = f.map(v => {
+      const n = numero(v);
+      return (n !== null && String(v).trim() !== '' && /^[\d.,\s-]+$/.test(String(v))) ? n : v;
+    });
+    filas.push(fNum.concat([
+      a.motivos.join(', ') || (a.agregado ? 'AGREGADO' : ''),
+      a.resultado || 'SIN REVISAR',
+      a.comentario || '',
+      fecha,
+      s.operario || config.operario || '',
+      s.reabierto ? 'SI' : 'NO'
+    ]));
+  }
+  return filas;
+}
+function exportarExcel(s){
+  s = s || sesion;
+  if (!s) return;
+  try {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(filasExport(s));
+    ws['!cols'] = s.heads.map(() => ({wch:13})).concat([{wch:12},{wch:13},{wch:30},{wch:13},{wch:16},{wch:10}]);
+    XLSX.utils.book_append_sheet(wb, ws, 'Chequeo');
+    XLSX.writeFile(wb, 'chequeo_' + fechaCorta(s.creado).replace(/\//g,'-') + '.xlsx');
+    toast('Excel descargado');
+  } catch(e){
+    toast('No se pudo crear el Excel');
+    console.error(e);
+  }
+}
+
+function payload(s){
+  return {
+    sesionId: s.id,
+    fecha: s.creado,
+    archivo: s.archivo || '',
+    operario: s.operario || config.operario || '',
+    columnas: ['FECHA','SESION','ANIMAL','ESTADO','DEL','DUS','PARAMETRO','RESULTADO','COMENTARIO','REVISADO POR','AGREGADO EN CAMPO','REABIERTO'],
+    filas: s.animales.map(a => ([
+      fechaCorta(s.creado), s.id, a.num, a.estado, a.del, a.dus,
+      a.motivos.join(', '), a.resultado || 'SIN REVISAR', a.comentario || '',
+      s.operario || config.operario || '', a.agregado ? 'SI' : 'NO', s.reabierto ? 'SI' : 'NO'
+    ]))
+  };
+}
+function enviarASheet(s){
+  if (!config.urlSheet) return Promise.reject(new Error('sin-url'));
+  return fetch(config.urlSheet, {
+    method:'POST',
+    // texto plano evita el preflight CORS que Apps Script no responde
+    headers: {'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(payload(s))
+  }).then(r => {
+    if (!r.ok) throw new Error('http-' + r.status);
+    return r.text();
+  });
+}
+function enviarSesion(){
+  if (!sesion) return;
+  const pend = sesion.animales.filter(a => !a.resultado).length;
+  const seguir = pend === 0 || confirm('Quedan ' + pend + ' animales sin revisar. ¿Enviar de todas formas?');
+  if (!seguir) return;
+  sesion.operario = sesion.operario || config.operario || '';
+  guardarSesion().then(() => {
+    if (!config.urlSheet){
+      toast('Guardado. Falta configurar la hoja de Google.');
+      return;
+    }
+    if (!navigator.onLine){
+      toast('Guardado. Se enviará solo cuando haya internet.');
+      return;
+    }
+    const btn = document.getElementById('btnEnviar');
+    btn.disabled = true; btn.textContent = 'Enviando…';
+    enviarASheet(sesion).then(() => {
+      sesion.enviado = true;
+      sesion.enviadoEn = new Date().toISOString();
+      return guardarSesion();
+    }).then(() => {
+      toast('Enviado a la hoja de Google');
+    }).catch(err => {
+      console.error(err);
+      toast('Sin conexión con la hoja. Queda guardado y se reintenta.');
+    }).then(() => {
+      btn.disabled = false; btn.textContent = 'Guardar y enviar';
+    });
+  });
+}
+function sincronizarPendientes(manual){
+  if (!config.urlSheet || !navigator.onLine){
+    if (manual) toast(config.urlSheet ? 'No hay internet' : 'Falta configurar la hoja de Google');
+    return;
+  }
+  const pend = sesiones.filter(s => !s.enviado && s.animales.some(a => a.resultado));
+  if (!pend.length){ if (manual) toast('No hay chequeos pendientes'); return; }
+  let ok = 0;
+  const uno = i => {
+    if (i >= pend.length){
+      cargarSesiones().then(() => { if (vista === 'inicio') pintarSesiones(); });
+      if (ok) toast(ok + (ok === 1 ? ' chequeo enviado' : ' chequeos enviados'));
+      else if (manual) toast('No se pudo enviar. Revisa la conexión.');
+      return;
+    }
+    const s = pend[i];
+    enviarASheet(s).then(() => {
+      s.enviado = true; s.enviadoEn = new Date().toISOString(); ok++;
+      return dbGuardar('sesiones', s);
+    }).catch(e => console.error(e)).then(() => uno(i+1));
+  };
+  uno(0);
+}
+
+/* =========================================================
+   10. Ajustes
+   ========================================================= */
+function pintarAjustes(){
+  document.getElementById('urlSheet').value = config.urlSheet || '';
+  document.getElementById('operario').value = config.operario || '';
+  const info = document.getElementById('infoAlmacen');
+  const pend = sesiones.filter(s => !s.enviado && s.animales.some(a => a.resultado)).length;
+  let txt = sesiones.length + ' chequeos guardados en la tablet · ' + pend + ' sin enviar.';
+  info.textContent = txt;
+  pintarListaChequeos();
+  if (navigator.storage && navigator.storage.persisted){
+    navigator.storage.persisted().then(p => {
+      info.textContent = txt + (p ? ' Almacenamiento protegido.' : ' Almacenamiento normal.');
+    });
+  }
+}
+
+/* ---- lista de chequeos guardados (Ajustes) → detalle de solo lectura ---- */
+function pintarListaChequeos(){
+  const cont = document.getElementById('listaChequeos');
+  if (!cont) return;
+  if (!sesiones.length){
+    cont.innerHTML = '<div class="card-sub">No hay chequeos guardados.</div>';
+    return;
+  }
+  cont.innerHTML = sesiones.map(s => {
+    const estado = s.enviado ? 'Enviado' : (s.animales.some(a => a.resultado) ? 'Sin enviar' : 'Sin empezar');
+    return '<button class="ses" style="padding:9px 0;border-bottom:1px dotted #e6ebe3" onclick="verDetalle(\'' + s.id + '\')">' +
+      '<span class="ses-info">' +
+        '<span style="font-weight:700">' + esc(fechaCorta(s.creado)) + '</span>' +
+        '<span class="ses-det">' + s.animales.length + ' animales · ' + estado + '</span>' +
+      '</span>' +
+      '<span class="ses-flecha">›</span>' +
+    '</button>';
+  }).join('');
+}
+
+/* ---- detalle de un chequeo, de solo lectura ---- */
+let _sesionDetalle = null;
+function verDetalle(id){
+  const s = sesiones.find(x => x.id === id);
+  if (!s) return;
+  _sesionDetalle = s;
+  pintarDetalle(s);
+  ver('sesion');
+}
+function pintarDetalle(s){
+  const cont = document.getElementById('resumenSesion');
+  if (!cont) return;
+  const tot = s.animales.length;
+  const pren = s.animales.filter(a => a.resultado === 'PREÑADA').length;
+  const vac = s.animales.filter(a => a.resultado === 'VACIA').length;
+  const abo = s.animales.filter(a => a.resultado === 'ABORTO').length;
+  const sinRev = s.animales.filter(a => !a.resultado).length;
+
+  let html = '<div class="card">' +
+    '<h3>' + esc(fechaLarga(s.creado)) + '</h3>' +
+    '<div class="card-sub">Archivo: ' + esc(s.archivo || '—') + '</div>' +
+    '<div class="card-sub">Revisó: ' + esc(s.operario || '—') + '</div>';
+
+  html += s.enviado
+    ? '<div class="aviso bien" style="margin-top:12px"><b>Enviado a la hoja de Google</b>' +
+      (s.enviadoEn ? esc(fechaLarga(s.enviadoEn)) : '') +
+      (s.reabierto ? ' · Se reabrió para corregir después de enviarse' : '') + '</div>'
+    : '<div class="aviso malo" style="margin-top:12px"><b>No se ha enviado a la hoja de Google</b>Solo está guardado en esta tablet.</div>';
+
+  html += '<div class="totales">' +
+    [['Animales',tot], ['Preñadas',pren], ['Vacías',vac], ['Abortos',abo], ['Sin revisar',sinRev]]
+      .map(([etq,val]) => '<div><b>' + val + '</b><span>' + esc(etq) + '</span></div>').join('') +
+  '</div></div>';
+
+  html += '<div class="card"><h3>Animales</h3><div class="tabla-wrap" style="margin-top:10px"><table class="tabla-datos"><thead><tr>' +
+    '<th>Número</th><th>Estado</th><th>DEL</th><th>DUS</th><th>Parámetro</th><th>Resultado</th><th>Comentario</th>' +
+    '</tr></thead><tbody>' +
+    s.animales.map(a => '<tr>' +
+      '<td>' + esc(a.num) + '</td>' +
+      '<td>' + esc(a.estado) + '</td>' +
+      '<td>' + esc(a.del) + '</td>' +
+      '<td>' + esc(a.dus) + '</td>' +
+      '<td>' + esc(a.motivos.join(', ')) + '</td>' +
+      '<td>' + esc(a.resultado || 'Sin revisar') + '</td>' +
+      '<td>' + esc(a.comentario || '') + '</td>' +
+    '</tr>').join('') +
+  '</tbody></table></div></div>';
+
+  html += '<div style="margin:16px 0"><button class="btn btn-borde" onclick="exportarExcel(_sesionDetalle)">⬇ Excel</button></div>';
+
+  html += '<div style="margin:34px 0 40px;padding-top:18px;border-top:1px solid var(--line)">' +
+    '<button class="btn btn-texto" onclick="borrarSesion(\'' + s.id + '\')">🗑 Borrar este chequeo</button></div>';
+
+  cont.innerHTML = html;
+}
+
+/* ---- borrar un chequeo (tablet + hoja de Google) — solo desde el detalle ---- */
+function quitarSesionLocal_(id){
+  return dbBorrar('sesiones', id).then(() => cargarSesiones()).then(() => {
+    if (sesion && sesion.id === id) sesion = null;
+    if (_sesionDetalle && _sesionDetalle.id === id) _sesionDetalle = null;
+    pintarListaChequeos();
+    if (vista === 'inicio') pintarSesiones();
+  });
+}
+
+function borrarSesion(id){
+  const s = sesiones.find(x => x.id === id);
+  if (!s) return;
+  const n = s.animales.length;
+
+  // nunca se envió: no hay nada que mover en la hoja, se borra solo de la tablet
+  if (!s.enviado){
+    const texto = 'Se va a borrar este chequeo de la tablet: ' + n + (n === 1 ? ' animal' : ' animales') +
+      '. Nunca se envió a la hoja de Google, así que ahí no hay nada que borrar. ¿Continuar?';
+    if (!confirm(texto)) return;
+    quitarSesionLocal_(id).then(() => { irAtras(); toast('Chequeo borrado'); });
+    return;
+  }
+
+  const texto = 'Vas a borrar este chequeo: se pierden ' + n + (n === 1 ? ' animal' : ' animales') +
+    ' de la tablet y ' + n + (n === 1 ? ' fila' : ' filas') +
+    ' de la hoja de Google (se mueven a la papelera, no se eliminan). ¿Continuar?';
+  if (!confirm(texto)) return;
+
+  // sin internet no se puede tocar la hoja: no se borra nada, ni de la tablet
+  if (!navigator.onLine){
+    toast('Necesitas conexión a internet para borrar también de la hoja de Google. No se borró nada.');
+    return;
+  }
+
+  pedir({accion:'borrar', sesionId:s.id}).then(j => {
+    return quitarSesionLocal_(id).then(() => {
+      irAtras();
+      const mov = j.movidas || 0;
+      toast(mov + (mov === 1 ? ' fila movida a la papelera. Chequeo borrado.' : ' filas movidas a la papelera. Chequeo borrado.'));
+    });
+  }).catch(e => {
+    console.error(e);
+    toast('No se pudo borrar de la hoja de Google. No se borró nada.');
+  });
+}
+
+function guardarUrl(){
+  const u = document.getElementById('urlSheet').value.trim();
+  config.urlSheet = u;
+  dbGuardar('config', {clave:'urlSheet', valor:u}).then(() => {
+    document.getElementById('ajustesMsg').innerHTML = '<div class="aviso bien">Dirección guardada.</div>';
+    sincronizarPendientes(false);
+    revisarPreparados();
+  });
+}
+function guardarOperario(){
+  config.operario = document.getElementById('operario').value.trim();
+  dbGuardar('config', {clave:'operario', valor:config.operario});
+}
+function probarSheet(){
+  const u = document.getElementById('urlSheet').value.trim();
+  const msg = document.getElementById('ajustesMsg');
+  if (!u){ msg.innerHTML = '<div class="aviso malo">Escribe primero la dirección.</div>'; return; }
+  if (!navigator.onLine){ msg.innerHTML = '<div class="aviso">No hay internet en este momento.</div>'; return; }
+  msg.innerHTML = '<div class="aviso">Probando…</div>';
+  fetch(u, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({prueba:true, columnas:['PRUEBA'], filas:[['Conexión de prueba']]})})
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
+    .then(() => { msg.innerHTML = '<div class="aviso bien">Conexión correcta. Revisa la hoja: debe aparecer una fila de prueba.</div>'; })
+    .catch(e => { msg.innerHTML = '<div class="aviso malo"><b>No respondió</b>Verifica que el Apps Script esté publicado con acceso para "cualquier persona".</div>'; });
+}
+
+/* =========================================================
+   11. Arranque
+   ========================================================= */
+function pintarRed(){
+  const el = document.getElementById('net');
+  const t = document.getElementById('netTxt');
+  if (navigator.onLine){ el.classList.remove('off'); t.textContent = 'Con internet'; }
+  else { el.classList.add('off'); t.textContent = 'Sin internet · todo se guarda en la tablet'; }
+}
+window.addEventListener('online', () => { pintarRed(); sincronizarPendientes(false); if (vista === 'inicio') revisarPreparados(); });
+window.addEventListener('offline', pintarRed);
+
+window.addEventListener('beforeunload', () => { if (sesion) { try { dbGuardar('sesiones', sesion); } catch(e){} } });
+
+function iniciar(){
+  pintarRed();
+  pintarParams();
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+  Promise.all([dbLeer('config','urlSheet'), dbLeer('config','operario'), cargarSesiones()])
+    .then(([u, o]) => {
+      config.urlSheet = u ? u.valor : '';
+      config.operario = o ? o.valor : '';
+      ver('inicio', true);
+      sincronizarPendientes(false);
+      revisarPreparados();
+    })
+    .catch(err => {
+      console.error(err);
+      ver('inicio', true);
+      toast('No se pudo abrir el almacenamiento del dispositivo');
+    });
+}
+iniciar();
+
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('../sw.js').catch(e => console.warn('SW', e));
+  });
+}
+</script>
+</body>
+</html>
