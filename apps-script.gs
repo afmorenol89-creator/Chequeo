@@ -1,6 +1,7 @@
 /**
  * Recibe los chequeos reproductivos de la tablet y guarda el histórico en esta hoja.
- * También sirve de puente para preparar un chequeo en el computador y recogerlo en la tablet.
+ * También sirve de puente para preparar un chequeo en el computador y recogerlo en la tablet,
+ * y da soporte a la herramienta "Lotes de ordeño".
  *
  * Pestañas que crea solo:
  *   Chequeos          → una fila por animal, de todos los chequeos (el histórico).
@@ -9,9 +10,15 @@
  *   Preparados_Index  → control de esas listas.
  *   Papelera          → filas de "Chequeos" que se borraron desde la app (no se eliminan,
  *                       quedan aquí con la fecha de borrado, por si hay que recuperarlas).
+ *   Animales_Ordeno   → un animal por fila; nunca se borran filas, un animal que sale queda
+ *                       con estado = fuera.
+ *   Movimientos       → registro que solo crece; el lote actual de un animal es su último
+ *                       movimiento (por fecha_hora).
+ *   Config_Lotes      → lista de lotes disponibles (se siembra con 1, 2, 3 al crearla).
+ *   Trabajadores      → lista de nombres para el selector "¿quién eres?" (se crea vacía).
  *
- * VERSIÓN 4 — agrega la acción 'borrar': mueve las filas de un chequeo de
- * "Chequeos" a "Papelera" (sin eliminarlas) y quita su fila de "Resumen".
+ * VERSIÓN 5 — agrega las acciones de "Lotes de ordeño": lotes_estado (GET), movimientos,
+ * animal_nuevo, animal_salida, animal_reactivar. No cambia nada del chequeo reproductivo.
  * Si ya tenías una versión anterior, después de pegar esto hay que hacer
  * Implementar → Administrar implementaciones → lápiz → Versión nueva → Implementar.
  */
@@ -21,12 +28,16 @@ function doPost(e) {
     var datos = JSON.parse(e.postData.contents);
     var libro = SpreadsheetApp.getActiveSpreadsheet();
 
-    if (datos.prueba)                  return prueba_(libro);
-    if (datos.accion === 'preparar')   return preparar_(libro, datos);
-    if (datos.accion === 'pendientes') return pendientes_(libro);
-    if (datos.accion === 'traer')      return traer_(libro, datos);
-    if (datos.accion === 'recogido')   return recogido_(libro, datos);
-    if (datos.accion === 'borrar')     return borrar_(libro, datos);
+    if (datos.prueba)                     return prueba_(libro);
+    if (datos.accion === 'preparar')      return preparar_(libro, datos);
+    if (datos.accion === 'pendientes')    return pendientes_(libro);
+    if (datos.accion === 'traer')         return traer_(libro, datos);
+    if (datos.accion === 'recogido')      return recogido_(libro, datos);
+    if (datos.accion === 'borrar')        return borrar_(libro, datos);
+    if (datos.accion === 'movimientos')   return movimientos_(libro, datos);
+    if (datos.accion === 'animal_nuevo')      return animalNuevo_(libro, datos);
+    if (datos.accion === 'animal_salida')     return animalSalida_(libro, datos);
+    if (datos.accion === 'animal_reactivar')  return animalReactivar_(libro, datos);
     return guardarChequeo_(libro, datos);
 
   } catch (err) {
@@ -34,8 +45,16 @@ function doPost(e) {
   }
 }
 
-function doGet() {
-  return ContentService.createTextOutput('Servicio de chequeo reproductivo activo.');
+function doGet(e) {
+  try {
+    var accion = e && e.parameter && e.parameter.accion;
+    if (accion === 'lotes_estado') {
+      return lotesEstado_(SpreadsheetApp.getActiveSpreadsheet());
+    }
+    return ContentService.createTextOutput('Servicio de chequeo reproductivo activo.');
+  } catch (err) {
+    return salida_({ok: false, error: String(err)});
+  }
 }
 
 /* ---------------------------------------------------------
@@ -239,6 +258,202 @@ function limpiarViejos_(libro) {
   for (var j = p.length - 1; j >= 0; j--) {
     if (viejas[String(p[j][0])]) hp.deleteRow(j + 2);
   }
+}
+
+/* ---------------------------------------------------------
+   Lotes de ordeño
+   --------------------------------------------------------- */
+var COLS_ANIMALES = ['numero', 'nombre', 'estado', 'origen', 'fecha_entrada',
+                      'ingresado_por', 'fecha_salida', 'motivo_salida', 'sacado_por'];
+var COLS_MOV       = ['id', 'fecha_hora', 'numero', 'lote_anterior', 'lote_nuevo', 'usuario', 'dispositivo'];
+var COLS_LOTES     = ['lote'];
+var COLS_TRABAJADORES = ['nombre'];
+
+function hojaAnimales_(libro)     { return hoja_(libro, 'Animales_Ordeno', COLS_ANIMALES); }
+function hojaMovimientos_(libro)  { return hoja_(libro, 'Movimientos', COLS_MOV); }
+function hojaTrabajadores_(libro) { return hoja_(libro, 'Trabajadores', COLS_TRABAJADORES); }
+
+function hojaConfigLotes_(libro) {
+  var existia = !!libro.getSheetByName('Config_Lotes');
+  var h = hoja_(libro, 'Config_Lotes', COLS_LOTES);
+  if (!existia) {
+    h.getRange(2, 1, 3, 1).setValues([[1], [2], [3]]);
+  }
+  return h;
+}
+
+/** Busca un animal por número. Devuelve {fila, valores} o null. */
+function buscarAnimal_(h, numero) {
+  if (h.getLastRow() < 2) return null;
+  var vals = h.getRange(2, 1, h.getLastRow() - 1, COLS_ANIMALES.length).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]) === String(numero)) return {fila: i + 2, valores: vals[i]};
+  }
+  return null;
+}
+
+/**
+ * GET ?accion=lotes_estado — todo lo que la app necesita para abrir sin más ida y vuelta:
+ * animales activos con su lote actual, lotes disponibles, trabajadores y salidas recientes.
+ */
+function lotesEstado_(libro) {
+  var hAnimales = hojaAnimales_(libro);
+  var animales = [];
+  var salidas = [];
+
+  if (hAnimales.getLastRow() > 1) {
+    var vals = hAnimales.getRange(2, 1, hAnimales.getLastRow() - 1, COLS_ANIMALES.length).getValues();
+    var limite = new Date().getTime() - 30 * 24 * 60 * 60 * 1000;
+    for (var i = 0; i < vals.length; i++) {
+      var f = vals[i];
+      var estado = String(f[2]);
+      if (estado === 'activo') {
+        animales.push({numero: f[0], nombre: f[1]});
+      } else if (estado === 'fuera') {
+        var t = f[6] instanceof Date ? f[6].getTime() : new Date(f[6]).getTime();
+        if (t && t >= limite) {
+          salidas.push({
+            numero: f[0],
+            nombre: f[1],
+            fecha_salida: f[6] instanceof Date ? f[6].toISOString() : String(f[6]),
+            motivo_salida: f[7],
+            sacado_por: f[8]
+          });
+        }
+      }
+    }
+  }
+
+  // lote actual de cada animal = su movimiento con fecha_hora más reciente
+  var loteMasReciente = {};
+  var hMov = hojaMovimientos_(libro);
+  if (hMov.getLastRow() > 1) {
+    var mv = hMov.getRange(2, 1, hMov.getLastRow() - 1, COLS_MOV.length).getValues();
+    for (var j = 0; j < mv.length; j++) {
+      var numero = String(mv[j][2]);
+      var fechaHora = mv[j][1] instanceof Date ? mv[j][1].getTime() : new Date(mv[j][1]).getTime();
+      var actual = loteMasReciente[numero];
+      if (!actual || fechaHora > actual.t) {
+        loteMasReciente[numero] = {t: fechaHora, lote: mv[j][4]};
+      }
+    }
+  }
+  animales.forEach(function (a) {
+    var m = loteMasReciente[String(a.numero)];
+    a.lote = m ? m.lote : '';
+  });
+
+  var lotes = [];
+  var hLotes = hojaConfigLotes_(libro);
+  if (hLotes.getLastRow() > 1) {
+    var lv = hLotes.getRange(2, 1, hLotes.getLastRow() - 1, 1).getValues();
+    for (var k = 0; k < lv.length; k++) {
+      if (lv[k][0] !== '') lotes.push(lv[k][0]);
+    }
+  }
+
+  var trabajadores = [];
+  var hTrab = hojaTrabajadores_(libro);
+  if (hTrab.getLastRow() > 1) {
+    var tv = hTrab.getRange(2, 1, hTrab.getLastRow() - 1, 1).getValues();
+    for (var n = 0; n < tv.length; n++) {
+      if (tv[n][0] !== '') trabajadores.push(tv[n][0]);
+    }
+  }
+
+  return salida_({ok: true, animales: animales, lotes: lotes, trabajadores: trabajadores, salidas: salidas});
+}
+
+/**
+ * POST accion=movimientos — recibe una lista de movimientos (asignar/mover de lote).
+ * Ignora los que ya tengan ese id en la pestaña, así reintentar desde la tablet es seguro.
+ */
+function movimientos_(libro, datos) {
+  var hMov = hojaMovimientos_(libro);
+  var movs = datos.movimientos || [];
+  if (!movs.length) return salida_({ok: true, guardados: 0});
+
+  var existentes = {};
+  if (hMov.getLastRow() > 1) {
+    var idsExistentes = hMov.getRange(2, 1, hMov.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < idsExistentes.length; i++) existentes[String(idsExistentes[i][0])] = true;
+  }
+
+  var filas = [];
+  for (var j = 0; j < movs.length; j++) {
+    var m = movs[j];
+    if (existentes[String(m.id)]) continue;
+    filas.push([m.id, m.fecha_hora, m.numero, m.lote_anterior || '', m.lote_nuevo, m.usuario || '', m.dispositivo || '']);
+    existentes[String(m.id)] = true;
+  }
+
+  if (filas.length) {
+    hMov.getRange(hMov.getLastRow() + 1, 1, filas.length, COLS_MOV.length).setValues(filas);
+  }
+  return salida_({ok: true, guardados: filas.length});
+}
+
+/**
+ * POST accion=animal_nuevo — crea un animal en Animales_Ordeno.
+ * Si el número ya existe activo o fuera, no lo duplica: devuelve un error específico
+ * para que la app avise o (si está fuera) ofrezca "Reactivar".
+ */
+function animalNuevo_(libro, datos) {
+  var h = hojaAnimales_(libro);
+  var encontrado = buscarAnimal_(h, datos.numero);
+  if (encontrado) {
+    var estado = String(encontrado.valores[2]);
+    if (estado === 'activo') return salida_({ok: false, error: 'existeActivo'});
+    if (estado === 'fuera')  return salida_({ok: false, error: 'existeFuera'});
+  }
+
+  h.appendRow([
+    datos.numero, datos.nombre || '', 'activo', 'manual',
+    new Date(), datos.usuario || '', '', '', ''
+  ]);
+
+  if (datos.lote) {
+    var hMov = hojaMovimientos_(libro);
+    hMov.appendRow([
+      datos.id || Utilities.getUuid(), datos.fecha_hora || new Date(),
+      datos.numero, '', datos.lote, datos.usuario || '', datos.dispositivo || ''
+    ]);
+  }
+
+  return salida_({ok: true});
+}
+
+/**
+ * POST accion=animal_salida — saca un animal de ordeño (secado, venta, muerte, otro).
+ * Si ya estaba fuera, no vuelve a aplicar el cambio (reintentar es seguro).
+ */
+function animalSalida_(libro, datos) {
+  var h = hojaAnimales_(libro);
+  var encontrado = buscarAnimal_(h, datos.numero);
+  if (!encontrado) return salida_({ok: false, error: 'noExiste'});
+  if (String(encontrado.valores[2]) === 'fuera') return salida_({ok: true, ya: true});
+
+  h.getRange(encontrado.fila, 3).setValue('fuera');
+  h.getRange(encontrado.fila, 7).setValue(datos.fecha_hora ? new Date(datos.fecha_hora) : new Date());
+  h.getRange(encontrado.fila, 8).setValue(datos.motivo || '');
+  h.getRange(encontrado.fila, 9).setValue(datos.usuario || '');
+
+  return salida_({ok: true});
+}
+
+/**
+ * POST accion=animal_reactivar — vuelve a poner activo a un animal que había salido,
+ * conservando la misma fila (y por lo tanto su historial de movimientos).
+ * Si ya estaba activo, no hace nada (reintentar es seguro).
+ */
+function animalReactivar_(libro, datos) {
+  var h = hojaAnimales_(libro);
+  var encontrado = buscarAnimal_(h, datos.numero);
+  if (!encontrado) return salida_({ok: false, error: 'noExiste'});
+  if (String(encontrado.valores[2]) === 'activo') return salida_({ok: true, ya: true});
+
+  h.getRange(encontrado.fila, 3).setValue('activo');
+  return salida_({ok: true});
 }
 
 /* --------------------------------------------------------- */
