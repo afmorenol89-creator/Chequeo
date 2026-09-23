@@ -17,8 +17,8 @@
  *   Config_Lotes      → lista de lotes disponibles (se siembra con 1, 2, 3 al crearla).
  *   Trabajadores      → lista de nombres para el selector "¿quién eres?" (se crea vacía).
  *
- * VERSIÓN 6 — agrega accion=cargar_excel (aplica la revisión de la pantalla de carga)
- * y los campos origen/ingresado_por/fecha_entrada en lotes_estado. No cambia nada del
+ * VERSIÓN 7 — agrega movimientos_recientes a lotes_estado (últimos 300 movimientos de
+ * toda la finca, para el historial corto de la ficha del animal). No cambia nada del
  * chequeo reproductivo.
  * Si ya tenías una versión anterior, después de pegar esto hay que hacer
  * Implementar → Administrar implementaciones → lápiz → Versión nueva → Implementar.
@@ -330,23 +330,38 @@ function lotesEstado_(libro) {
     }
   }
 
-  // lote actual de cada animal = su movimiento con fecha_hora más reciente
+  // lote actual de cada animal = su movimiento con fecha_hora más reciente;
+  // de paso arma el historial corto (últimos movimientos de toda la finca).
   var loteMasReciente = {};
+  var movRecientes = [];
   var hMov = hojaMovimientos_(libro);
   if (hMov.getLastRow() > 1) {
     var mv = hMov.getRange(2, 1, hMov.getLastRow() - 1, COLS_MOV.length).getValues();
     for (var j = 0; j < mv.length; j++) {
       var numero = String(mv[j][2]);
-      var fechaHora = mv[j][1] instanceof Date ? mv[j][1].getTime() : new Date(mv[j][1]).getTime();
+      var fechaHoraVal = mv[j][1];
+      var fechaHora = fechaHoraVal instanceof Date ? fechaHoraVal.getTime() : new Date(fechaHoraVal).getTime();
       var actual = loteMasReciente[numero];
       if (!actual || fechaHora > actual.t) {
         loteMasReciente[numero] = {t: fechaHora, lote: mv[j][4]};
       }
+      movRecientes.push({
+        numero: mv[j][2],
+        fecha_hora: fechaHoraVal instanceof Date ? fechaHoraVal.toISOString() : String(fechaHoraVal),
+        lote_anterior: mv[j][3],
+        lote_nuevo: mv[j][4],
+        usuario: mv[j][5],
+        t: fechaHora
+      });
     }
   }
   animales.forEach(function (a) {
     var m = loteMasReciente[String(a.numero)];
     a.lote = m ? m.lote : '';
+  });
+  movRecientes.sort(function (a, b) { return b.t - a.t; });
+  movRecientes = movRecientes.slice(0, 300).map(function (m) {
+    return {numero: m.numero, fecha_hora: m.fecha_hora, lote_anterior: m.lote_anterior, lote_nuevo: m.lote_nuevo, usuario: m.usuario};
   });
 
   var lotes = [];
@@ -367,7 +382,10 @@ function lotesEstado_(libro) {
     }
   }
 
-  return salida_({ok: true, animales: animales, lotes: lotes, trabajadores: trabajadores, salidas: salidas});
+  return salida_({
+    ok: true, animales: animales, lotes: lotes, trabajadores: trabajadores,
+    salidas: salidas, movimientos_recientes: movRecientes
+  });
 }
 
 /**

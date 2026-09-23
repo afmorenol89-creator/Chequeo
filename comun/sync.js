@@ -36,3 +36,27 @@ function pedirGet(urlSheet, accion){
     return j;
   });
 }
+
+/* =========================================================
+   Cola de movimientos pendientes (para que la tablet funcione sin señal)
+   ========================================================= */
+
+/** Guarda un movimiento local (queda pendiente) y de una vez intenta subirlo si hay señal. */
+function encolarMovimiento(urlSheet, mov){
+  return dbGuardar('pendientes', mov).then(() => sincronizarPendientes(urlSheet));
+}
+
+/** Intenta subir todo lo pendiente. Ignora los que la hoja ya tenga (reintentar es seguro). */
+function sincronizarPendientes(urlSheet){
+  return dbTodo('pendientes').then(pendientes => {
+    if (!pendientes.length) return {enviados: 0, quedan: 0};
+    if (!navigator.onLine || !urlSheet) return {enviados: 0, quedan: pendientes.length};
+    return pedir(urlSheet, {accion: 'movimientos', movimientos: pendientes}).then(() =>
+      Promise.all(pendientes.map(p => dbBorrar('pendientes', p.id))).then(() => ({enviados: pendientes.length, quedan: 0}))
+    ).catch(() => ({enviados: 0, quedan: pendientes.length}));
+  });
+}
+
+function contarPendientes(){
+  return dbTodo('pendientes').then(p => p.length);
+}

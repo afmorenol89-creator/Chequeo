@@ -51,11 +51,26 @@
         <button type="button" class="icon-btn" onclick="ver('ajustes')" aria-label="Ajustes">⚙</button>
       </div>
     </div>
-    <button type="button" class="btn btn-verde" onclick="ver('cargar')">📥 Cargar Excel</button>
-    <div class="vacio">
-      <span class="ic">🥛</span>
-      La lista principal, la ficha del animal y el modo rápido llegan en la siguiente fase.
+
+    <div style="display:flex;gap:10px;margin-bottom:14px">
+      <button type="button" class="btn btn-borde" style="margin-bottom:0" onclick="ver('cargar')">📥 Excel</button>
+      <button type="button" class="btn btn-borde" style="margin-bottom:0" onclick="iniciarModoRapido()">⚡ Rápido</button>
     </div>
+
+    <div class="campo" style="margin-bottom:6px">
+      <input type="text" id="buscador" placeholder="Buscar por número o nombre">
+    </div>
+
+    <div id="listaPrincipal"></div>
+  </section>
+
+  <section id="v-ficha" class="oculto">
+    <div id="fichaCont"></div>
+    <button type="button" class="btn btn-borde" style="margin-top:10px" onclick="irAInicio()">Volver</button>
+  </section>
+
+  <section id="v-rapido" class="oculto">
+    <div id="rapidoCont"></div>
   </section>
 
   <section id="v-cargar" class="oculto">

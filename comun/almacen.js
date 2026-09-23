@@ -5,7 +5,7 @@
    que no son el chequeo reproductivo (que tiene su propia base).
    ========================================================= */
 const DB_NOMBRE_FINCA = 'lotes-ordeno';
-const DB_VER_FINCA = 1;
+const DB_VER_FINCA = 2;
 let _dbFinca = null;
 
 function abrirDB(){
@@ -16,6 +16,8 @@ function abrirDB(){
       const db = e.target.result;
       if (!db.objectStoreNames.contains('config')) db.createObjectStore('config', {keyPath:'clave'});
       if (!db.objectStoreNames.contains('animales')) db.createObjectStore('animales', {keyPath:'numero'});
+      // cola de movimientos hechos en este dispositivo, esperando subir a la hoja
+      if (!db.objectStoreNames.contains('pendientes')) db.createObjectStore('pendientes', {keyPath:'id'});
     };
     req.onsuccess = e => { _dbFinca = e.target.result; res(_dbFinca); };
     req.onerror = () => rej(req.error);
@@ -39,6 +41,17 @@ function dbTodo(store){
     const r = st.getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error);
   }));
 }
+function dbBorrar(store, clave){
+  return tx(store, 'readwrite').then(st => new Promise((res, rej) => {
+    const r = st.delete(clave); r.onsuccess = () => res(); r.onerror = () => rej(r.error);
+  }));
+}
+
+function uuid(){
+  return (self.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : (Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10));
+}
 
 /** Config guardada por clave/valor: {clave:'urlSheet', valor:'...'} — mismo formato que usa el chequeo. */
 function cargarConfig(){
@@ -46,9 +59,7 @@ function cargarConfig(){
     const c = {urlSheet: '', usuario: '', dispositivo: ''};
     filas.forEach(f => { c[f.clave] = f.valor; });
     if (!c.dispositivo){
-      c.dispositivo = (self.crypto && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : ('disp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8));
+      c.dispositivo = 'disp_' + uuid();
       dbGuardar('config', {clave: 'dispositivo', valor: c.dispositivo});
     }
     return c;

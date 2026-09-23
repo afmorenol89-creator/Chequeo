@@ -50,7 +50,7 @@ button{cursor:pointer;border:none;background:none}
 .net{
   display:flex;align-items:center;gap:8px;justify-content:center;
   font-size:0.82rem;padding:7px 12px;background:#e8eee4;color:var(--muted);
-  border-bottom:1px solid var(--line);
+  border-bottom:1px solid var(--line);cursor:pointer;
 }
 .net.off{background:#fdf3e3;color:#8a5a10}
 .net .pip{width:9px;height:9px;border-radius:50%;background:var(--verde)}

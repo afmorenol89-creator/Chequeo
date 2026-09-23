@@ -10,6 +10,13 @@ let estadoServidor = null;   // resultado de lotes_estado (animales activos, tra
 let revisionActual = null;   // {nuevos, noVienen} calculado al comparar el Excel con la hoja
 let decisionesSalida = {};   // numero (string) -> {tipo, texto}
 
+let animalesPorNumero = {};   // numero (string) -> {numero, nombre, lote, origen, ingresado_por, fecha_entrada}
+let lotesDisponibles = [];    // ej. [1,2,3]
+let movimientosRecientes = []; // últimos movimientos de toda la finca (para el historial de cada animal)
+let animalSeleccionado = null; // numero (string) abierto en la ficha
+let rapidoLote = null;         // lote destino elegido en modo rápido
+let rapidoHechos = {};         // numero (string) -> true, ya tocado en esta sesión de modo rápido
+
 const COL_NUM = 'numero de animal'; // ya pasado por norm()
 const COL_NOM = 'nombre';
 
@@ -18,28 +25,47 @@ const COL_NOM = 'nombre';
    ========================================================= */
 function ver(v){
   vista = v;
-  ['quien', 'ajustes', 'inicio', 'cargar', 'revision', 'resultado'].forEach(n => {
+  ['quien', 'ajustes', 'inicio', 'cargar', 'revision', 'resultado', 'ficha', 'rapido'].forEach(n => {
     const el = document.getElementById('v-' + n);
     if (el) el.classList.toggle('oculto', n !== v);
   });
   window.scrollTo(0, 0);
 }
 
-function actualizarNet(){
-  const el = document.getElementById('net'), t = document.getElementById('netTxt');
-  if (navigator.onLine){ el.classList.remove('off'); t.textContent = 'Con internet'; }
-  else { el.classList.add('off'); t.textContent = 'Sin conexión'; }
+/** Vuelve a la lista principal usando lo que ya hay en memoria (sin ir a la hoja). */
+function irAInicio(){
+  pintarListaPrincipal();
+  ver('inicio');
 }
-window.addEventListener('online', actualizarNet);
-window.addEventListener('offline', actualizarNet);
+
+function actualizarEstadoSync(){
+  const el = document.getElementById('net'), t = document.getElementById('netTxt');
+  contarPendientes().then(n => {
+    if (!navigator.onLine){
+      el.classList.add('off');
+      t.textContent = 'Sin conexión' + (n ? ' · ' + n + ' pendiente' + (n === 1 ? '' : 's') : '');
+    } else if (n > 0){
+      el.classList.add('off');
+      t.textContent = n + ' cambio' + (n === 1 ? '' : 's') + ' pendiente' + (n === 1 ? '' : 's') + ' por subir';
+    } else {
+      el.classList.remove('off');
+      t.textContent = 'Todo al día';
+    }
+  });
+}
+window.addEventListener('online', () => {
+  actualizarEstadoSync();
+  sincronizarPendientes(config.urlSheet).then(actualizarEstadoSync);
+});
+window.addEventListener('offline', actualizarEstadoSync);
 
 /* =========================================================
    Arranque: base local, hoja configurada, usuario del dispositivo
    ========================================================= */
 function iniciar(){
-  actualizarNet();
   abrirDB().then(() => cargarConfig()).then(c => {
     config = c;
+    actualizarEstadoSync();
     seguirInicio();
   });
 }
@@ -49,6 +75,7 @@ function seguirInicio(){
   if (!config.usuario){ mostrarSelectorUsuarioInicial(); return; }
   document.getElementById('nombreUsuario').textContent = config.usuario;
   ver('inicio');
+  refrescarYPintarLista();
 }
 
 function guardarUrl(){
@@ -96,6 +123,16 @@ document.addEventListener('DOMContentLoaded', () => {
   drop.addEventListener('drop', e => {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files[0]) leerExcel(e.dataTransfer.files[0]);
+  });
+
+  document.getElementById('buscador').addEventListener('input', pintarListaPrincipal);
+
+  document.getElementById('net').addEventListener('click', () => {
+    if (!navigator.onLine){ toast('Sin conexión'); return; }
+    sincronizarPendientes(config.urlSheet).then(r => {
+      actualizarEstadoSync();
+      if (r.enviados) toast(r.enviados + ' cambio' + (r.enviados === 1 ? '' : 's') + ' subido' + (r.enviados === 1 ? '' : 's'));
+    });
   });
 
   iniciar();
@@ -322,9 +359,230 @@ function confirmarCargaExcel(){
     document.getElementById('cargaInfo').innerHTML = '';
     document.getElementById('archivoExcel').value = '';
     ver('resultado');
+    refrescarYPintarLista();
   }).catch(e => {
     toast('No se pudo guardar: ' + (e.message || 'revisa la conexión'));
   }).then(() => {
     btn.disabled = false; btn.textContent = 'Guardar cambios';
   });
+}
+
+/* =========================================================
+   Lista principal
+   ========================================================= */
+
+/** Trae el estado de la hoja (o el caché local si no hay señal) y pinta la lista. */
+function refrescarYPintarLista(){
+  const traer = navigator.onLine && config.urlSheet
+    ? pedirGet(config.urlSheet, 'lotes_estado').then(j => {
+        lotesDisponibles = j.lotes || [];
+        movimientosRecientes = j.movimientos_recientes || [];
+        animalesPorNumero = {};
+        (j.animales || []).forEach(a => { animalesPorNumero[String(a.numero)] = a; });
+        return guardarCacheServidor(j);
+      }).catch(() => cargarCacheLocal())
+    : cargarCacheLocal();
+
+  return traer.then(aplicarPendientesLocales).then(pintarListaPrincipal);
+}
+
+function guardarCacheServidor(j){
+  return dbTodo('animales')
+    .then(previos => Promise.all(previos.map(a => dbBorrar('animales', a.numero))))
+    .then(() => Promise.all([
+      guardarConfigValor('cacheLotes', j.lotes || []),
+      guardarConfigValor('cacheMovimientos', j.movimientos_recientes || []),
+      Promise.all((j.animales || []).map(a => dbGuardar('animales', a)))
+    ]));
+}
+
+function cargarCacheLocal(){
+  return Promise.all([dbTodo('animales'), dbLeer('config', 'cacheLotes'), dbLeer('config', 'cacheMovimientos')])
+    .then(([animales, lotesC, movC]) => {
+      animalesPorNumero = {};
+      animales.forEach(a => { animalesPorNumero[String(a.numero)] = a; });
+      lotesDisponibles = (lotesC && lotesC.valor) || [];
+      movimientosRecientes = (movC && movC.valor) || [];
+    });
+}
+
+/** Aplica sobre animalesPorNumero los movimientos que este dispositivo aún no ha subido. */
+function aplicarPendientesLocales(){
+  return dbTodo('pendientes').then(pendientes => {
+    pendientes
+      .slice()
+      .sort((a, b) => new Date(a.fecha_hora) - new Date(b.fecha_hora))
+      .forEach(p => {
+        const a = animalesPorNumero[String(p.numero)];
+        if (a) a.lote = p.lote_nuevo;
+      });
+  });
+}
+
+function pintarListaPrincipal(){
+  const cont = document.getElementById('listaPrincipal');
+  const filtro = norm(document.getElementById('buscador').value);
+  const todos = Object.keys(animalesPorNumero).map(k => animalesPorNumero[k])
+    .filter(a => !filtro || norm(a.numero).indexOf(filtro) >= 0 || norm(a.nombre).indexOf(filtro) >= 0)
+    .sort((a, b) => Number(a.numero) - Number(b.numero));
+
+  if (!todos.length){
+    cont.innerHTML = '<div class="vacio"><span class="ic">🥛</span>' +
+      (filtro ? 'No encontré animales con ese número o nombre.' : 'No hay animales activos todavía. Carga un Excel para empezar.') +
+      '</div>';
+    return;
+  }
+
+  let html = '';
+  const sinLote = todos.filter(a => !a.lote);
+  if (sinLote.length){
+    html += '<div class="grupo-titulo">Sin lote (' + sinLote.length + ')</div>' +
+      '<div class="lista-nombres">' + sinLote.map(filaAnimalHtml).join('') + '</div>';
+  }
+  lotesDisponibles.forEach(lote => {
+    const deEsteLote = todos.filter(a => String(a.lote) === String(lote));
+    if (!deEsteLote.length && filtro) return; // con búsqueda activa, no mostrar lotes vacíos
+    html += '<div class="grupo-titulo">Lote ' + esc(lote) + ' (' + deEsteLote.length + ')</div>';
+    html += deEsteLote.length
+      ? '<div class="lista-nombres">' + deEsteLote.map(filaAnimalHtml).join('') + '</div>'
+      : '<div class="aviso">Sin animales en este lote.</div>';
+  });
+
+  cont.innerHTML = html;
+  cont.querySelectorAll('[data-abrir]').forEach(el => {
+    el.addEventListener('click', () => abrirFicha(el.getAttribute('data-abrir')));
+  });
+}
+
+function filaAnimalHtml(a){
+  return '<div class="fila-animal" data-abrir="' + esc(a.numero) + '" style="cursor:pointer">' +
+    '<span class="num">' + esc(a.numero) + '</span>' +
+    '<span class="nom">' + esc(a.nombre || '(sin nombre)') + '</span>' +
+  '</div>';
+}
+
+/* =========================================================
+   Ficha del animal
+   ========================================================= */
+function abrirFicha(numero){
+  animalSeleccionado = String(numero);
+  pintarFicha();
+  ver('ficha');
+}
+
+function pintarFicha(){
+  const a = animalesPorNumero[animalSeleccionado];
+  if (!a){ irAInicio(); return; }
+  const cont = document.getElementById('fichaCont');
+
+  const historial = movimientosRecientes.filter(m => String(m.numero) === animalSeleccionado).slice(0, 6);
+
+  let html = '<div class="card">' +
+    '<div style="font-size:1.3rem;font-weight:800">' + esc(a.numero) + ' · ' + esc(a.nombre || '(sin nombre)') + '</div>' +
+    '<div class="top-sub">' + (a.lote ? 'Lote actual: ' + esc(a.lote) : 'Sin lote') + '</div>' +
+  '</div>';
+
+  html += '<div class="grupo-titulo">Mover a</div>' +
+    '<div class="motivos" style="margin-bottom:16px">' +
+    lotesDisponibles.map(lote => {
+      const esActual = String(a.lote) === String(lote);
+      return '<button type="button" class="motivo-btn' + (esActual ? ' mantener' : '') + '" ' +
+        'aria-pressed="' + (esActual ? 'true' : 'false') + '"' + (esActual ? ' disabled' : '') +
+        ' data-lote="' + esc(lote) + '">Lote ' + esc(lote) + '</button>';
+    }).join('') + '</div>';
+
+  html += '<div class="grupo-titulo">Historial</div>';
+  html += historial.length
+    ? '<div class="lista-nombres">' + historial.map(m =>
+        '<div class="fila-animal" style="flex-direction:column;align-items:stretch;gap:4px">' +
+          '<div>' + (m.lote_anterior ? 'Lote ' + esc(m.lote_anterior) + ' → ' : '') + 'Lote ' + esc(m.lote_nuevo) + '</div>' +
+          '<div class="meta">' + esc(fechaCorta(m.fecha_hora)) + ' · ' + esc(m.usuario || '?') + '</div>' +
+        '</div>'
+      ).join('') + '</div>'
+    : '<div class="aviso">Sin movimientos todavía.</div>';
+
+  cont.innerHTML = html;
+  cont.querySelectorAll('[data-lote]').forEach(btn => {
+    btn.addEventListener('click', () => confirmarMoverLote(btn.getAttribute('data-lote')));
+  });
+}
+
+function confirmarMoverLote(loteNuevo){
+  const a = animalesPorNumero[animalSeleccionado];
+  if (!a) return;
+  const desde = a.lote ? ('del Lote ' + a.lote) : 'sin lote';
+  if (!confirm('¿Mover ' + a.numero + ' ' + (a.nombre || '') + ' ' + desde + ' al Lote ' + loteNuevo + '?')) return;
+
+  registrarMovimiento(a, loteNuevo);
+  pintarFicha();
+}
+
+/** Aplica el movimiento de forma optimista en memoria y lo encola para subir. */
+function registrarMovimiento(a, loteNuevo){
+  const mov = {
+    id: uuid(), fecha_hora: new Date().toISOString(),
+    numero: a.numero, lote_anterior: a.lote || '', lote_nuevo: loteNuevo,
+    usuario: config.usuario, dispositivo: config.dispositivo
+  };
+  a.lote = loteNuevo;
+  movimientosRecientes.unshift({
+    numero: mov.numero, fecha_hora: mov.fecha_hora,
+    lote_anterior: mov.lote_anterior, lote_nuevo: mov.lote_nuevo, usuario: mov.usuario
+  });
+  toast('Movido al Lote ' + loteNuevo);
+  encolarMovimiento(config.urlSheet, mov).then(actualizarEstadoSync);
+}
+
+/* =========================================================
+   Modo rápido: un lote destino, varios animales a golpe de toque
+   ========================================================= */
+function iniciarModoRapido(){
+  if (!lotesDisponibles.length){ toast('No hay lotes configurados todavía.'); return; }
+  rapidoLote = null;
+  rapidoHechos = {};
+  pintarRapidoElegirLote();
+  ver('rapido');
+}
+
+function pintarRapidoElegirLote(){
+  const cont = document.getElementById('rapidoCont');
+  cont.innerHTML =
+    '<div class="card"><b>Modo rápido</b><div class="top-sub">Elige primero el lote destino</div></div>' +
+    '<div class="motivos" style="margin-bottom:16px">' +
+    lotesDisponibles.map(lote => '<button type="button" class="motivo-btn" data-lote-rapido="' + esc(lote) + '">Lote ' + esc(lote) + '</button>').join('') +
+    '</div>' +
+    '<button type="button" class="btn btn-borde" onclick="irAInicio()">Cancelar</button>';
+  cont.querySelectorAll('[data-lote-rapido]').forEach(b => {
+    b.addEventListener('click', () => { rapidoLote = b.getAttribute('data-lote-rapido'); pintarRapidoTocar(); });
+  });
+}
+
+function pintarRapidoTocar(){
+  const cont = document.getElementById('rapidoCont');
+  const todos = Object.keys(animalesPorNumero).map(k => animalesPorNumero[k]).sort((a, b) => Number(a.numero) - Number(b.numero));
+
+  cont.innerHTML =
+    '<div class="card"><b>Modo rápido · Lote ' + esc(rapidoLote) + '</b><div class="top-sub">Toca cada animal que entra a este lote</div></div>' +
+    '<div class="lista-nombres">' + todos.map(a => {
+      const hecho = !!rapidoHechos[String(a.numero)];
+      return '<button type="button" class="fila-animal" style="width:100%;text-align:left' + (hecho ? ';opacity:.5' : '') + '" ' +
+        'data-toca="' + esc(a.numero) + '"' + (hecho ? ' disabled' : '') + '>' +
+        '<span class="num">' + esc(a.numero) + '</span>' +
+        '<span class="nom">' + esc(a.nombre || '(sin nombre)') +
+          (hecho ? ' ✓' : (a.lote ? ' · Lote ' + esc(a.lote) : '')) + '</span>' +
+      '</button>';
+    }).join('') + '</div>' +
+    '<button type="button" class="btn btn-verde" style="margin-top:14px" onclick="irAInicio()">Terminar</button>';
+
+  cont.querySelectorAll('[data-toca]').forEach(btn => {
+    btn.addEventListener('click', () => tocarRapido(btn.getAttribute('data-toca')));
+  });
+}
+
+function tocarRapido(numero){
+  const a = animalesPorNumero[numero];
+  if (!a || rapidoHechos[numero]) return;
+  rapidoHechos[numero] = true;
+  registrarMovimiento(a, rapidoLote);
+  pintarRapidoTocar();
 }
