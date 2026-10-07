@@ -417,7 +417,7 @@
       <h3>Estado del dispositivo</h3>
       <div id="infoAlmacen" class="card-sub" style="margin-top:8px"></div>
       <div style="margin-top:14px">
-        <button class="btn btn-borde" onclick="sincronizarPendientes(true); sincronizarChequeos();">Enviar chequeos pendientes</button>
+        <button class="btn btn-borde" onclick="sincronizarChequeos(true)">Enviar chequeos pendientes</button>
       </div>
     </div>
 
@@ -1302,7 +1302,10 @@ function abrirSesion(id){
  *  - cada animal: gana la versión con el cambio más reciente (mod) de ese animal;
  *  - animales que solo están en una versión (agregados en campo): se conservan;
  *  - borrado y reabierto, una vez puestos, se quedan;
- *  - si algún animal cambió después del envío a la hoja, el chequeo vuelve a "sin enviar".
+ *  - "por enviar" (alguien tocó «Guardar y enviar») se conserva si se pidió después de la
+ *    última reapertura;
+ *  - si a la versión enviada le llegan cambios de animales que ese envío no llevaba, la hoja
+ *    quedó atrasada: el chequeo vuelve a "sin enviar" y queda por enviar otra vez.
  */
 function fusionarSesiones(a, b){
   if (!a) return b;
@@ -1315,22 +1318,27 @@ function fusionarSesiones(a, b){
   const posicion = {};
   res.animales.forEach((x, i) => { posicion[x.id] = i; });
   const agregados = [], otros = [];
-  let cambio = false; // ¿el resultado quedó distinto de la versión base?
+  let cambio = false;    // ¿el resultado quedó distinto de la versión base?
+  let deLaOtra = false;  // ¿entró algún animal de la otra versión?
   (otra.animales || []).forEach(x => {
     if (Object.prototype.hasOwnProperty.call(posicion, x.id)){
       const i = posicion[x.id];
-      if (marca(x) > marca(res.animales[i])){ res.animales[i] = JSON.parse(JSON.stringify(x)); cambio = true; }
+      if (marca(x) > marca(res.animales[i])){ res.animales[i] = JSON.parse(JSON.stringify(x)); cambio = deLaOtra = true; }
     } else {
       (x.agregado ? agregados : otros).push(JSON.parse(JSON.stringify(x)));
-      cambio = true;
+      cambio = deLaOtra = true;
     }
   });
   res.animales = agregados.concat(res.animales, otros);
   if (otra.borrado && !res.borrado){ res.borrado = true; cambio = true; }
   if (otra.reabierto && !res.reabierto){ res.reabierto = true; cambio = true; }
-  if (res.enviado && res.enviadoEn){
-    const enviadoEn = String(res.enviadoEn);
-    if (res.animales.some(x => String(x.mod || '') > enviadoEn)){ res.enviado = false; cambio = true; }
+  if (otra.porEnviar && !res.porEnviar && !res.enviado &&
+      String(otra.actualizado || '') > String(res.reabiertoEn || '')){ res.porEnviar = true; cambio = true; }
+  if (res.enviado){
+    const enviadoEn = String(res.enviadoEn || '');
+    if (deLaOtra || res.animales.some(x => String(x.mod || '') > enviadoEn)){
+      res.enviado = false; res.porEnviar = true; cambio = true;
+    }
   }
   // Si quedó distinto de las dos versiones, su hora debe ser más nueva que ambas:
   // así los dispositivos que tenían cualquiera de las dos saben que deben bajarla.
@@ -1348,7 +1356,7 @@ function paraSubir(s){
   return c;
 }
 
-let _sync = {corriendo: false, otraVez: false, timer: null, ultimo: null, error: false};
+let _sync = {corriendo: false, otraVez: false, timer: null, ultimo: null, error: false, manual: false};
 
 function programarSync(ms){
   clearTimeout(_sync.timer);
@@ -1424,10 +1432,20 @@ document.getElementById('lista').addEventListener('focusout', () => {
   setTimeout(() => { if (_repintarPendiente) repintarSesionAbierta(); }, 300);
 });
 
-/** Sube lo pendiente y baja lo nuevo. Seguro de llamar muchas veces: nunca corre dos a la vez. */
-function sincronizarChequeos(){
+/**
+ * Sube lo pendiente y baja lo nuevo; al final manda a la pestaña Chequeos los que alguien pidió
+ * enviar (porEnviar), ya combinados con lo de los demás dispositivos.
+ * Seguro de llamar muchas veces: nunca corre dos a la vez.
+ * `manual`: lo pidió el usuario con el botón, así que se le avisa cómo terminó el envío.
+ */
+function sincronizarChequeos(manual){
+  if (manual === true) _sync.manual = true;
   if (_sync.corriendo){ _sync.otraVez = true; return Promise.resolve(); }
-  if (!config.urlSheet || !navigator.onLine || !leerPin()){ pintarSyncInfo(); return Promise.resolve(); }
+  if (!config.urlSheet || !navigator.onLine || !leerPin()){
+    pintarSyncInfo();
+    if (_sync.manual){ _sync.manual = false; sincronizarPendientes(true); }
+    return Promise.resolve();
+  }
   _sync.corriendo = true;
   pintarSyncInfo();
 
@@ -1481,6 +1499,12 @@ function sincronizarChequeos(){
     console.error('sincronizar', e);
     _sync.error = true;
   }).then(() => cargarSesiones()).then(() => {
+    // después de combinar, para no mandar a la hoja una versión atrasada
+    // (si la sincronización falló, se envía igual lo que hay en el dispositivo)
+    const manualAhora = _sync.manual;
+    _sync.manual = false;
+    return sincronizarPendientes(manualAhora);
+  }).then(() => {
     _sync.corriendo = false;
     if (vista === 'inicio') pintarSesiones();
     if (vista === 'ajustes') pintarAjustes();
@@ -1606,6 +1630,8 @@ function enviarSesion(){
   const seguir = pend === 0 || confirm('Quedan ' + pend + ' animales sin revisar. ¿Enviar de todas formas?');
   if (!seguir) return;
   sesion.operario = sesion.operario || config.operario || '';
+  // queda en cola: si ahora no se puede, lo envía la próxima sincronización (este u otro dispositivo)
+  sesion.porEnviar = true;
   guardarSesion().then(() => {
     if (!config.urlSheet){
       toast('Guardado. Falta configurar la hoja de Google.');
@@ -1620,6 +1646,7 @@ function enviarSesion(){
     enviarASheet(sesion).then(() => {
       sesion.enviado = true;
       sesion.enviadoEn = ahoraISO();
+      sesion.porEnviar = false;
       return guardarSesion();
     }).then(() => {
       toast('Enviado a la hoja de Google');
@@ -1631,31 +1658,36 @@ function enviarSesion(){
     });
   });
 }
+/**
+ * Manda a la pestaña Chequeos los que alguien pidió enviar (porEnviar) y no se pudieron mandar.
+ * Solo esos: un chequeo a medias que nadie ha enviado no se toca, porque enviarlo lo cerraría
+ * en todos los dispositivos. Lo llama sincronizarChequeos al final, ya con las versiones combinadas.
+ */
 function sincronizarPendientes(manual){
   if (!config.urlSheet || !navigator.onLine){
     if (manual) toast(config.urlSheet ? 'No hay internet' : 'Falta configurar la hoja de Google');
-    return;
+    return Promise.resolve();
   }
-  const pend = sesiones.filter(s => !s.enviado && s.animales.some(a => a.resultado));
-  if (!pend.length){ if (manual) toast('No hay chequeos pendientes'); return; }
+  const pend = sesiones.filter(s => s.porEnviar && !s.enviado);
+  if (!pend.length){ if (manual) toast('No hay chequeos pendientes de enviar'); return Promise.resolve(); }
   let ok = 0;
   const uno = i => {
     if (i >= pend.length){
-      cargarSesiones().then(() => { if (vista === 'inicio') pintarSesiones(); });
       if (ok) programarSync(500);
       if (ok) toast(ok + (ok === 1 ? ' chequeo enviado' : ' chequeos enviados'));
       else if (manual) toast('No se pudo enviar. Revisa la conexión.');
-      return;
+      return cargarSesiones().then(() => { if (vista === 'inicio') pintarSesiones(); });
     }
     // si es la que está abierta, se usa la copia en memoria para no perder lo que tiene
     const s = (sesion && sesion.id === pend[i].id) ? sesion : pend[i];
-    enviarASheet(s).then(() => {
-      s.enviado = true; s.enviadoEn = ahoraISO(); ok++;
+    return enviarASheet(s).then(() => {
+      s.enviado = true; s.enviadoEn = ahoraISO(); s.porEnviar = false; ok++;
       s.actualizado = ahoraISO(); s.porSubir = true;
+      if (sesion && sesion.id === s.id && vista === 'campo') repintarSesionAbierta();
       return dbGuardar('sesiones', s);
     }).catch(e => console.error(e)).then(() => uno(i+1));
   };
-  uno(0);
+  return uno(0);
 }
 
 /* =========================================================
@@ -1848,10 +1880,10 @@ function pintarRed(){
   if (navigator.onLine){ el.classList.remove('off'); t.textContent = 'Con internet'; }
   else { el.classList.add('off'); t.textContent = 'Sin internet · todo se guarda en la tablet'; }
 }
-window.addEventListener('online', () => { pintarRed(); sincronizarPendientes(false); sincronizarChequeos(); if (vista === 'inicio') revisarPreparados(); });
+window.addEventListener('online', () => { pintarRed(); sincronizarChequeos(); if (vista === 'inicio') revisarPreparados(); });
 window.addEventListener('offline', () => { pintarRed(); pintarSyncInfo(); });
 window.addEventListener('pin-invalido', () => {
-  asegurarPin('El PIN no es correcto. Escríbelo de nuevo.').then(() => { sincronizarPendientes(false); sincronizarChequeos(); revisarPreparados(); });
+  asegurarPin('El PIN no es correcto. Escríbelo de nuevo.').then(() => { sincronizarChequeos(); revisarPreparados(); });
 });
 // al volver a la app (la tablet estuvo apagada o en otra app) se trae lo de los demás
 document.addEventListener('visibilitychange', () => {
@@ -1874,7 +1906,7 @@ function iniciar(){
       config.operario = o ? o.valor : '';
       ver('inicio', true);
       // el PIN se pide una vez por dispositivo; cuando ya está, se sube lo pendiente
-      asegurarPin().then(() => { sincronizarPendientes(false); sincronizarChequeos(); revisarPreparados(); });
+      asegurarPin().then(() => { sincronizarChequeos(); revisarPreparados(); });
     })
     .catch(err => {
       console.error(err);

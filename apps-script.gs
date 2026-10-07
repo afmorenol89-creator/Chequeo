@@ -24,6 +24,9 @@
  * combinan animal por animal (gana el cambio más reciente de cada animal). Al borrar un
  * chequeo queda marcado como borrado en Sesiones_App para que desaparezca de los demás.
  *
+ * VERSIÓN 11 — Al combinar, si un chequeo ya enviado recibe cambios de animales que ese
+ * envío no llevaba, vuelve a "sin enviar" y queda en cola para reenviarse (porEnviar).
+ *
  * VERSIÓN 9 — PIN de la finca. Toda solicitud (POST) debe traer "pin" y se compara con la
  * propiedad del script PIN_FINCA; si no coincide, responde {ok:false, error:'pinInvalido'}.
  * Si PIN_FINCA no existe, rechaza todo (así nadie entra por un olvido).
@@ -702,7 +705,10 @@ function marcarSesionBorrada_(libro, sesionId) {
  *  - cada animal: gana la versión con el cambio más reciente (mod) de ese animal;
  *  - animales que solo están en una versión (agregados en campo): se conservan;
  *  - borrado y reabierto, una vez puestos, se quedan;
- *  - si algún animal cambió después del envío a la hoja, el chequeo vuelve a "sin enviar".
+ *  - "por enviar" (alguien tocó «Guardar y enviar») se conserva si se pidió después de la
+ *    última reapertura;
+ *  - si a la versión enviada le llegan cambios de animales que ese envío no llevaba, la hoja
+ *    quedó atrasada: el chequeo vuelve a "sin enviar" y queda por enviar otra vez.
  */
 function fusionarSesiones_(a, b) {
   if (!a) return b;
@@ -715,22 +721,27 @@ function fusionarSesiones_(a, b) {
   var posicion = {};
   res.animales.forEach(function (x, i) { posicion[x.id] = i; });
   var agregados = [], otros = [];
-  var cambio = false; // ¿el resultado quedó distinto de la versión base?
+  var cambio = false;    // ¿el resultado quedó distinto de la versión base?
+  var deLaOtra = false;  // ¿entró algún animal de la otra versión?
   (otra.animales || []).forEach(function (x) {
     if (posicion.hasOwnProperty(x.id)) {
       var i = posicion[x.id];
-      if (marca(x) > marca(res.animales[i])) { res.animales[i] = JSON.parse(JSON.stringify(x)); cambio = true; }
+      if (marca(x) > marca(res.animales[i])) { res.animales[i] = JSON.parse(JSON.stringify(x)); cambio = deLaOtra = true; }
     } else {
       (x.agregado ? agregados : otros).push(JSON.parse(JSON.stringify(x)));
-      cambio = true;
+      cambio = deLaOtra = true;
     }
   });
   res.animales = agregados.concat(res.animales, otros);
   if (otra.borrado && !res.borrado) { res.borrado = true; cambio = true; }
   if (otra.reabierto && !res.reabierto) { res.reabierto = true; cambio = true; }
-  if (res.enviado && res.enviadoEn) {
-    var enviadoEn = String(res.enviadoEn);
-    if (res.animales.some(function (x) { return String(x.mod || '') > enviadoEn; })) { res.enviado = false; cambio = true; }
+  if (otra.porEnviar && !res.porEnviar && !res.enviado &&
+      String(otra.actualizado || '') > String(res.reabiertoEn || '')) { res.porEnviar = true; cambio = true; }
+  if (res.enviado) {
+    var enviadoEn = String(res.enviadoEn || '');
+    if (deLaOtra || res.animales.some(function (x) { return String(x.mod || '') > enviadoEn; })) {
+      res.enviado = false; res.porEnviar = true; cambio = true;
+    }
   }
   // Si quedó distinto de las dos versiones, su hora debe ser más nueva que ambas:
   // así los dispositivos que tenían cualquiera de las dos saben que deben bajarla.

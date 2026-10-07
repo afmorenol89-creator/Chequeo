@@ -52,11 +52,14 @@ offline, and is **shared across devices** through the `Sesiones_App` sheet tab (
 below). Data model:
 
 - **sesión**: `{id, creado, nombre, archivo, heads, colId/colStatus/colDel/colDus, operario, animales,
-  enviado, enviadoEn, reabierto, reabiertoEn, actualizado, porSubir, borrado}`. `enviado === true` means the session is **locked**
+  enviado, enviadoEn, porEnviar, reabierto, reabiertoEn, actualizado, porSubir, borrado}`. `enviado === true` means the session is **locked**
   (read-only in modo campo) because it's already on the Google Sheet — editing is blocked both in
   the UI (`disabled`/`readonly`) and defensively inside `marcar()`/`anotar()`/`agregarAnimal()`.
   `reabrirSesion()` is the only way to unlock it; it sets `reabierto = true` permanently (this flag
   is never cleared, even after the session is re-sent and re-locked).
+  `porEnviar === true` means someone tapped «Guardar y enviar» but it hasn't reached the
+  `Chequeos` tab yet; only those are auto-sent (`sincronizarPendientes`). A half-done chequeo
+  without it is **never** auto-sent — sending locks it on every device.
 - **animal**: `{id, num, estado, del, dus, motivos, datos, resultado, comentario, cc, agregado, hora, mod}`.
   `cc` is the condición corporal as a string `'1.00'`…`'5.00'` in 0.25 steps (or `''`); it goes to
   the sheet/Excel as a number in the last column, `CONDICION CORPORAL`. `mod` is the ISO time of the
@@ -87,9 +90,11 @@ borrado}` from the sheet, uploads sessions with `porSubir` (or unknown to the sh
 migrates pre-sync sessions), downloads newer ones, and drops ones marked `borrado`. Conflicts are
 merged by `fusionarSesiones` (client) / `fusionarSesiones_` (server) — **the two must stay
 identical**: session fields from the newer `actualizado`, each animal by newer `mod`, animals present
-on only one side kept, `borrado`/`reabierto` sticky, and `enviado` reset if any animal changed after
-`enviadoEn`; when the merge differs from the base it bumps `actualizado` so every other device
-re-downloads. Deleting never removes the row in `Sesiones_App`: it leaves a tombstone (`borrado`).
+on only one side kept, `borrado`/`reabierto` sticky, `porEnviar` sticky unless requested before the
+last `reabiertoEn`, and `enviado` reset (with `porEnviar` set, so it's re-sent) if the sent version
+took any animal from the other side or any animal changed after `enviadoEn`; when the merge differs from the base it bumps `actualizado` so every other device
+re-downloads. At the end of every sync (after merging, so the sheet never gets a stale copy)
+`sincronizarPendientes()` sends the `porEnviar` sessions to `Chequeos`. Deleting never removes the row in `Sesiones_App`: it leaves a tombstone (`borrado`).
 Sessions are stored as JSON split into 40,000-char rows (cell limit is 50,000), each prefixed with
 `~` so Sheets never coerces it. The older "Enviar a la tablet" (`preparar_`…) flow still works but
 sync makes it mostly redundant.
