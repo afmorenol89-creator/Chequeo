@@ -16,7 +16,9 @@ Apps Script backend, deployed as-is.
   by both tools (`config.js` holds the fixed Apps Script URL and the farm PIN helpers).
 - `sw.js` — service worker (offline caching for the tablet).
 - `manifest.webmanifest` — PWA install metadata.
-- `apps-script.gs` — Google Apps Script Web App source. **Not deployed by this repo** — see below.
+- `apps-script.gs` — Google Apps Script Web App source. Deployed with clasp, **not** by `git push` — see below.
+- `appsscript.json` / `.claspignore` — clasp manifest and ignore list (`.clasp.json`, which holds the
+  script ID, is git-ignored and lives only on the user's Mac).
 - `INSTALACION.md` — end-user (Spanish) setup guide; read it before changing the deploy/setup flow.
 
 ## Commands
@@ -29,10 +31,15 @@ There is nothing to install, build, lint, or test. To work on the app:
   from the devtools console instead (see Verification below).
 - **Deploy the web app**: `git push origin main`. GitHub Pages serves directly from the repo root
   on `main` — there is no CI/build step. Live at the URL under the repo's GitHub Pages settings.
-- **Deploy the Sheets backend**: pasting `apps-script.gs` into Google's Apps Script editor and
-  redeploying is a *manual, separate* action the user does in their Google account — `git push`
-  does **not** propagate this file anywhere. Whenever `apps-script.gs` changes, tell the user to
-  paste it in and do Implementar → Administrar implementaciones → Versión nueva → Implementar.
+- **Deploy the Sheets backend**: `git push` does **not** touch it. It's deployed with clasp
+  (installed at `~/.npm-global/bin/clasp`, logged in to the sheet owner's account), from the repo root:
+  `clasp push --force && clasp deploy -i <deploymentId> -d "<descripción>"`. Always redeploy the
+  **existing** deployment (`-i`): its ID is the `AKfycb…` part of `FINCA.urlSheet` in
+  `comun/config.js`, and a new deployment would change the URL every device uses. `.claspignore`
+  limits the push to `apps-script.gs` + `appsscript.json` — check `clasp status` if that ever changes.
+  Push replaces the whole remote project with those files; script properties (`PIN_FINCA`) are kept.
+  Never paste the file by hand: a past manual paste mangled the accents (`PREÑADA` → `PRE√ëADA`),
+  which silently broke string comparisons.
 - **Verification**: with no test suite, changes are verified by loading `index.html` in a browser
   and driving it from the console — inject fake `sesion`/`sesiones` objects, stub `confirm`,
   `toast`, `pedir` (the fetch-to-Apps-Script helper) and `dbBorrar`/`cargarSesiones` to isolate

@@ -1,0 +1,4 @@
+# clasp solo sube el backend; todo lo demás es la app web (GitHub Pages)
+**/**
+!apps-script.gs
+!appsscript.json
