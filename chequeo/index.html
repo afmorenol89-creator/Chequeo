@@ -129,6 +129,15 @@
   .a-nota:focus{outline:none;border-color:var(--azul);box-shadow:0 0 0 3px #20618f22}
   .a-nota.tiene{border-color:#c9d6cb;background:#fbfcfa}
   .a-nota[readonly]{background:var(--panel);color:var(--muted)}
+  /* condición corporal: selector grande al lado del comentario */
+  .a-cc{
+    flex-shrink:0;min-width:112px;min-height:48px;padding:0 10px;border:1px solid var(--line);
+    border-radius:10px;background:var(--paper);font-weight:700;color:var(--muted);
+  }
+  .a-cc.tiene{border-color:#bcd9c5;background:var(--verde-suave);color:var(--verde)}
+  .a-cc:disabled{background:var(--panel);opacity:1}
+  .sync-info{font-size:0.84rem;color:var(--muted);text-align:center;margin:-6px 0 12px}
+  .sync-info.pend{color:#8a5a10}
   .ver-mas{
     background:none;color:var(--muted);font-size:0.85rem;padding:8px 2px;
     text-decoration:underline;text-underline-offset:3px;
@@ -299,6 +308,7 @@
     <div style="margin:16px 0">
       <button class="btn btn-verde" onclick="ver('cargar')">＋ Nuevo chequeo</button>
     </div>
+    <div class="sync-info" id="syncInfo"></div>
     <div id="listaSesiones"></div>
   </section>
 
@@ -373,6 +383,10 @@
         <label for="nvNota">Comentario</label>
         <input type="text" id="nvNota" autocomplete="off" placeholder="Opcional">
       </div>
+      <div class="campo">
+        <label for="nvCC">Condición corporal</label>
+        <select id="nvCC"></select>
+      </div>
       <div class="btn-fila">
         <button class="btn btn-borde" onclick="ver('campo')">Cancelar</button>
         <button class="btn btn-verde" onclick="agregarAnimal()">Agregar</button>
@@ -386,6 +400,7 @@
       <h3>Hoja de Google</h3>
       <div class="card-sub" style="margin-bottom:12px">Los chequeos se envían aquí cuando hay internet. Cada envío agrega filas, no borra las anteriores.</div>
       <div class="card-sub" style="margin-bottom:12px">La dirección de la hoja ya viene configurada en la app. El PIN de la finca se pide una sola vez en cada dispositivo.</div>
+      <div class="card-sub" style="margin-bottom:12px">Los chequeos (también los que van a medias) se comparten solos con los demás dispositivos cuando hay internet.</div>
       <button class="btn btn-borde" onclick="probarSheet()">Probar conexión</button>
       <div id="ajustesMsg" style="margin-top:12px"></div>
     </div>
@@ -402,7 +417,7 @@
       <h3>Estado del dispositivo</h3>
       <div id="infoAlmacen" class="card-sub" style="margin-top:8px"></div>
       <div style="margin-top:14px">
-        <button class="btn btn-borde" onclick="sincronizarPendientes(true)">Enviar chequeos pendientes</button>
+        <button class="btn btn-borde" onclick="sincronizarPendientes(true); sincronizarChequeos();">Enviar chequeos pendientes</button>
       </div>
     </div>
 
@@ -544,6 +559,22 @@ function fechaCorta(iso){
   const d = new Date(iso);
   return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
 }
+// Hora en ISO que nunca se repite en este dispositivo (siempre avanza al menos 1 ms):
+// con ella se decide qué cambio es más reciente al combinar dispositivos.
+let _ultimaMarca = '';
+function ahoraISO(){
+  let t = new Date().toISOString();
+  if (t <= _ultimaMarca) t = new Date(Date.parse(_ultimaMarca) + 1).toISOString();
+  _ultimaMarca = t;
+  return t;
+}
+// Condición corporal: escala de 1 a 5 en cuartos de punto.
+const CC_VALORES = (() => { const v = []; for (let x = 100; x <= 500; x += 25) v.push((x/100).toFixed(2)); return v; })();
+function ccTexto(v){ return v ? String(v).replace('.', ',') : ''; }
+function opcionesCC(actual, vacio){
+  return '<option value="">' + esc(vacio) + '</option>' +
+    CC_VALORES.map(v => '<option value="' + v + '"' + (String(actual) === v ? ' selected' : '') + '>' + ccTexto(v) + '</option>').join('');
+}
 let _toastT = null;
 function toast(msg){
   const v = document.getElementById('_toast');
@@ -579,7 +610,7 @@ function ver(v, sinPila){
   else if (v === 'sesion'){ t.textContent = 'Chequeo guardado'; s.textContent = ''; }
 
   window.scrollTo(0,0);
-  if (v === 'inicio'){ pintarSesiones(); revisarPreparados(); }
+  if (v === 'inicio'){ pintarSesiones(); revisarPreparados(); pintarSyncInfo(); }
   if (v === 'ajustes') pintarAjustes();
   if (v === 'agregar') prepararAgregar();
 }
@@ -812,18 +843,24 @@ function crearSesion(){
   });
 }
 
+// Todo cambio a la sesión abierta pasa por aquí: se guarda en el dispositivo,
+// queda marcada "por subir" y se programa la subida a los demás dispositivos.
 function guardarSesion(){
   if (!sesion) return Promise.resolve();
-  sesion.actualizado = new Date().toISOString();
-  return dbGuardar('sesiones', sesion).then(() => cargarSesiones()).catch(err => {
+  sesion.actualizado = ahoraISO();
+  sesion.porSubir = true;
+  return dbGuardar('sesiones', sesion).then(() => cargarSesiones()).then(() => {
+    programarSync(4000);
+  }).catch(err => {
     toast('No se pudo guardar en el dispositivo');
     console.error(err);
   });
 }
 
+// Los chequeos marcados como borrados (esperando avisar a los demás dispositivos) no se muestran.
 function cargarSesiones(){
   return dbTodo('sesiones').then(list => {
-    sesiones = list.sort((a,b) => (b.creado || '').localeCompare(a.creado || ''));
+    sesiones = list.filter(s => !s.borrado).sort((a,b) => (b.creado || '').localeCompare(a.creado || ''));
     return sesiones;
   });
 }
@@ -904,6 +941,9 @@ function pintarLista(){
         '<textarea class="a-nota' + (a.comentario ? ' tiene' : '') + '" rows="1" placeholder="Comentario" ' +
           (cerrado ? 'readonly ' : '') +
           'oninput="anotar(\'' + a.id + '\', this.value)">' + esc(a.comentario) + '</textarea>' +
+        '<select class="a-cc' + (a.cc ? ' tiene' : '') + '" aria-label="Condición corporal" ' +
+          (cerrado ? 'disabled ' : '') +
+          'onchange="ponerCC(\'' + a.id + '\', this.value, this)">' + opcionesCC(a.cc || '', 'CC —') + '</select>' +
       '</div>' +
       (a.agregado ? '' : '<button class="ver-mas" onclick="verDatos(\'' + a.id + '\', this)">Ver todos los datos</button>') +
       '<div class="a-datos oculto" id="dt_' + a.id + '"></div>' +
@@ -948,7 +988,7 @@ function reabrirSesion(){
   if (!ok) return;
   sesion.enviado = false;
   sesion.reabierto = true;
-  sesion.reabiertoEn = new Date().toISOString();
+  sesion.reabiertoEn = ahoraISO();
   guardarSesion().then(() => {
     if (vista === 'campo') ver('campo', true); // refresca título/subtítulo
     pintarLista();
@@ -969,12 +1009,22 @@ function actualizarProgreso(){
 }
 function buscarAnimal(id){ return sesion ? sesion.animales.find(a => a.id === id) : null; }
 
+// Marca de "este animal cambió ahora". Se hace en el momento (no al guardar),
+// para que una sincronización que llegue en medio no pise lo que se está escribiendo.
+function tocar(a){
+  const t = ahoraISO();
+  if (a) a.mod = t;
+  sesion.actualizado = t;
+  sesion.porSubir = true;
+}
+
 function marcar(id, valor){
   if (sesion && sesion.enviado) return; // cerrado: de solo lectura hasta que se reabra
   const a = buscarAnimal(id);
   if (!a) return;
   a.resultado = (a.resultado === valor) ? null : valor;
   a.hora = a.resultado ? new Date().toISOString() : null;
+  tocar(a);
   sesion.enviado = false;
   guardarSesion();
   // repinta solo esta tarjeta si el filtro no la va a mover
@@ -998,9 +1048,20 @@ function anotar(id, txt){
   const a = buscarAnimal(id);
   if (!a) return;
   a.comentario = txt;
+  tocar(a);
   sesion.enviado = false;
   clearTimeout(_notaT);
   _notaT = setTimeout(guardarSesion, 400);
+}
+function ponerCC(id, valor, el){
+  if (sesion && sesion.enviado) return; // cerrado: de solo lectura hasta que se reabra
+  const a = buscarAnimal(id);
+  if (!a) return;
+  a.cc = valor || '';
+  tocar(a);
+  sesion.enviado = false;
+  if (el) el.classList.toggle('tiene', !!a.cc);
+  guardarSesion();
 }
 function verDatos(id, btn){
   const a = buscarAnimal(id);
@@ -1024,6 +1085,7 @@ function prepararAgregar(){
   document.getElementById('nvNum').value = '';
   document.getElementById('nvEstado').value = '';
   document.getElementById('nvNota').value = '';
+  document.getElementById('nvCC').innerHTML = opcionesCC('', 'Sin anotar');
   setTimeout(() => document.getElementById('nvNum').focus(), 100);
 }
 function agregarAnimal(){
@@ -1032,11 +1094,15 @@ function agregarAnimal(){
   if (!num){ toast('Escribe el número del animal'); return; }
   const est = document.getElementById('nvEstado').value.trim();
   const nota = document.getElementById('nvNota').value.trim();
-  sesion.animales.unshift({
-    id: 'add_' + Date.now(),
+  const cc = document.getElementById('nvCC').value;
+  // el id lleva algo al azar: dos tablets pueden agregar animales en el mismo milisegundo
+  const nuevo = {
+    id: 'add_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
     num, estado: est || 'AGREGADO', del:'', dus:'',
-    motivos: [], datos: {}, resultado:null, comentario:nota, agregado:true, hora:null
-  });
+    motivos: [], datos: {}, resultado:null, comentario:nota, cc, agregado:true, hora:null
+  };
+  sesion.animales.unshift(nuevo);
+  tocar(nuevo);
   sesion.enviado = false;
   guardarSesion().then(() => {
     filtro = 'todas'; setFiltro('todas');
@@ -1220,6 +1286,227 @@ function abrirSesion(id){
 }
 
 /* =========================================================
+   8b. Chequeos compartidos entre dispositivos
+   Cada dispositivo guarda todo en su IndexedDB (funciona sin internet) y,
+   cuando hay señal, sube lo que cambió y baja lo que cambiaron los demás,
+   usando la pestaña Sesiones_App de la hoja (acciones sesiones_* en apps-script.gs).
+   - s.porSubir = true: tiene cambios de este dispositivo que la hoja no tiene.
+   - s.borrado  = true: se borró; se oculta y se avisa a la hoja para que los
+                        demás también lo quiten.
+   ========================================================= */
+
+/**
+ * Combina dos versiones del mismo chequeo. MISMA regla que fusionarSesiones_ en
+ * apps-script.gs — si se cambia aquí, hay que cambiarla allá también:
+ *  - datos generales del chequeo: los de la versión cambiada más recientemente;
+ *  - cada animal: gana la versión con el cambio más reciente (mod) de ese animal;
+ *  - animales que solo están en una versión (agregados en campo): se conservan;
+ *  - borrado y reabierto, una vez puestos, se quedan;
+ *  - si algún animal cambió después del envío a la hoja, el chequeo vuelve a "sin enviar".
+ */
+function fusionarSesiones(a, b){
+  if (!a) return b;
+  if (!b) return a;
+  const base = String(b.actualizado || '') > String(a.actualizado || '') ? b : a;
+  const otra = base === a ? b : a;
+  const res = JSON.parse(JSON.stringify(base));
+  res.animales = res.animales || [];
+  const marca = x => String(x.mod || x.hora || '');
+  const posicion = {};
+  res.animales.forEach((x, i) => { posicion[x.id] = i; });
+  const agregados = [], otros = [];
+  let cambio = false; // ¿el resultado quedó distinto de la versión base?
+  (otra.animales || []).forEach(x => {
+    if (Object.prototype.hasOwnProperty.call(posicion, x.id)){
+      const i = posicion[x.id];
+      if (marca(x) > marca(res.animales[i])){ res.animales[i] = JSON.parse(JSON.stringify(x)); cambio = true; }
+    } else {
+      (x.agregado ? agregados : otros).push(JSON.parse(JSON.stringify(x)));
+      cambio = true;
+    }
+  });
+  res.animales = agregados.concat(res.animales, otros);
+  if (otra.borrado && !res.borrado){ res.borrado = true; cambio = true; }
+  if (otra.reabierto && !res.reabierto){ res.reabierto = true; cambio = true; }
+  if (res.enviado && res.enviadoEn){
+    const enviadoEn = String(res.enviadoEn);
+    if (res.animales.some(x => String(x.mod || '') > enviadoEn)){ res.enviado = false; cambio = true; }
+  }
+  // Si quedó distinto de las dos versiones, su hora debe ser más nueva que ambas:
+  // así los dispositivos que tenían cualquiera de las dos saben que deben bajarla.
+  if (cambio){
+    const t = Date.parse(res.actualizado || '');
+    res.actualizado = new Date((isNaN(t) ? Date.now() : t) + 1).toISOString();
+  }
+  return res;
+}
+
+// Lo que viaja a la hoja: todo menos la marca local de "por subir".
+function paraSubir(s){
+  const c = Object.assign({}, s);
+  delete c.porSubir;
+  return c;
+}
+
+let _sync = {corriendo: false, otraVez: false, timer: null, ultimo: null, error: false};
+
+function programarSync(ms){
+  clearTimeout(_sync.timer);
+  _sync.timer = setTimeout(sincronizarChequeos, ms);
+}
+
+// La versión "actual" de un chequeo en este dispositivo: la abierta en memoria si es esa,
+// si no, la guardada en IndexedDB.
+function versionLocal(id){
+  if (sesion && sesion.id === id) return Promise.resolve(sesion);
+  return dbLeer('sesiones', id);
+}
+
+/**
+ * Guarda en el dispositivo la versión que llegó de la hoja.
+ * `enviadaActualizado`: el `actualizado` de lo que este dispositivo mandó (si mandó algo).
+ * Si mientras tanto aquí hubo cambios nuevos, no se pisan: se combinan y siguen "por subir".
+ */
+function aplicarRemota(remota, enviadaActualizado){
+  return versionLocal(remota.id).then(local => {
+    let final;
+    if (!local){
+      final = Object.assign({}, remota, {porSubir: false});
+    } else if (local.porSubir && local.actualizado !== enviadaActualizado){
+      final = fusionarSesiones(local, remota);
+      final.porSubir = true;
+    } else {
+      final = Object.assign({}, remota, {porSubir: false});
+    }
+    if (final.borrado) return olvidarSesion(final.id);
+
+    const abierta = sesion && sesion.id === final.id;
+    if (abierta) sesion = final;
+    return dbGuardar('sesiones', final).then(() => {
+      if (abierta) repintarSesionAbierta();
+    });
+  });
+}
+
+// Quita del dispositivo un chequeo que se borró (aquí o en otro dispositivo).
+function olvidarSesion(id){
+  return dbBorrar('sesiones', id).then(() => {
+    const enDetalle = vista === 'sesion' && _sesionDetalle && _sesionDetalle.id === id;
+    const enCampo = (vista === 'campo' || vista === 'agregar') && sesion && sesion.id === id;
+    if (_sesionDetalle && _sesionDetalle.id === id) _sesionDetalle = null;
+    if (sesion && sesion.id === id) sesion = null;
+    if (enDetalle || enCampo){
+      pila = [];
+      ver('inicio', true);
+      toast('Este chequeo se borró desde otro dispositivo');
+    }
+  });
+}
+
+// Si llegaron cambios del chequeo abierto en modo campo, se repinta la lista,
+// pero no mientras alguien está escribiendo un comentario o eligiendo la CC.
+let _repintarPendiente = false;
+function repintarSesionAbierta(){
+  if (vista !== 'campo'){ return; }
+  const enfocado = document.activeElement;
+  if (enfocado && document.getElementById('lista').contains(enfocado) &&
+      (enfocado.tagName === 'TEXTAREA' || enfocado.tagName === 'SELECT')){
+    _repintarPendiente = true;
+    return;
+  }
+  _repintarPendiente = false;
+  // sin ver(): eso sube la pantalla al principio y el trabajador perdería por dónde iba
+  document.getElementById('titulo').textContent = sesion.nombre || 'Chequeo';
+  document.getElementById('subtitulo').textContent = sesion.enviado ? 'Chequeo cerrado · solo lectura' : 'Toca preñada o vacía en cada animal';
+  pintarLista();
+}
+document.getElementById('lista').addEventListener('focusout', () => {
+  setTimeout(() => { if (_repintarPendiente) repintarSesionAbierta(); }, 300);
+});
+
+/** Sube lo pendiente y baja lo nuevo. Seguro de llamar muchas veces: nunca corre dos a la vez. */
+function sincronizarChequeos(){
+  if (_sync.corriendo){ _sync.otraVez = true; return Promise.resolve(); }
+  if (!config.urlSheet || !navigator.onLine || !leerPin()){ pintarSyncInfo(); return Promise.resolve(); }
+  _sync.corriendo = true;
+  pintarSyncInfo();
+
+  let remotas = {};
+  return pedir({accion:'sesiones_lista'}).then(j => {
+    (j.sesiones || []).forEach(r => { remotas[r.id] = r; });
+    return dbTodo('sesiones');
+  }).then(locales => {
+    // en memoria puede haber cambios más nuevos que en IndexedDB (comentario a medio escribir)
+    locales = locales.map(s => (sesion && sesion.id === s.id) ? sesion : s);
+
+    const aBorrar = locales.filter(s => remotas[s.id] && remotas[s.id].borrado);
+    const aSubir = locales.filter(s => !(remotas[s.id] && remotas[s.id].borrado) && (s.porSubir || !remotas[s.id]));
+    const porId = {};
+    locales.forEach(s => { porId[s.id] = s; });
+    const aBajar = Object.keys(remotas).filter(id => {
+      const r = remotas[id];
+      if (r.borrado) return false;
+      const l = porId[id];
+      if (!l) return true;
+      if (aSubir.indexOf(l) >= 0) return false; // al subirla vuelve combinada
+      return String(r.actualizado || '') > String(l.actualizado || '');
+    });
+
+    let cadena = Promise.all(aBorrar.map(s => olvidarSesion(s.id)));
+
+    if (aSubir.length){
+      const enviadas = aSubir.map(paraSubir);
+      const marcas = {};
+      enviadas.forEach(s => { marcas[s.id] = s.actualizado; });
+      cadena = cadena.then(() => pedir({accion:'sesiones_guardar', sesiones: enviadas})).then(j => {
+        const porIdEnv = {};
+        enviadas.forEach(s => { porIdEnv[s.id] = s; });
+        return (j.sesiones || []).reduce((p, r) => p.then(() =>
+          // r.sesion vacío = la hoja quedó igual a lo que se mandó
+          aplicarRemota(r.sesion || porIdEnv[r.id], marcas[r.id])
+        ), Promise.resolve());
+      });
+    }
+
+    if (aBajar.length){
+      cadena = cadena.then(() => pedir({accion:'sesiones_traer', ids: aBajar})).then(j =>
+        (j.sesiones || []).reduce((p, r) => p.then(() => aplicarRemota(r, null)), Promise.resolve())
+      );
+    }
+    return cadena;
+  }).then(() => {
+    _sync.ultimo = new Date();
+    _sync.error = false;
+  }).catch(e => {
+    console.error('sincronizar', e);
+    _sync.error = true;
+  }).then(() => cargarSesiones()).then(() => {
+    _sync.corriendo = false;
+    if (vista === 'inicio') pintarSesiones();
+    if (vista === 'ajustes') pintarAjustes();
+    pintarSyncInfo();
+    if (_sync.otraVez){ _sync.otraVez = false; programarSync(500); }
+  });
+}
+
+function pintarSyncInfo(){
+  const el = document.getElementById('syncInfo');
+  if (!el) return;
+  dbTodo('sesiones').then(todas => {
+    const pend = todas.filter(s => s.porSubir).length;
+    let txt, malo = false;
+    if (_sync.corriendo) txt = 'Sincronizando con los demás dispositivos…';
+    else if (!navigator.onLine){ txt = pend ? 'Sin internet · ' + pend + (pend === 1 ? ' chequeo con cambios por compartir' : ' chequeos con cambios por compartir') : ''; malo = !!pend; }
+    else if (_sync.error){ txt = 'No se pudo sincronizar con los demás dispositivos. Se reintenta solo.'; malo = true; }
+    else if (_sync.ultimo) txt = '✓ Al día con los demás dispositivos · ' +
+      _sync.ultimo.toLocaleTimeString('es-CO', {hour:'numeric', minute:'2-digit'});
+    else txt = '';
+    el.textContent = txt;
+    el.classList.toggle('pend', malo);
+  }).catch(() => {});
+}
+
+/* =========================================================
    9. Exportar e enviar
    ========================================================= */
 // s es opcional: por defecto exporta la sesión abierta en modo campo,
@@ -1227,7 +1514,8 @@ function abrirSesion(id){
 function filasExport(s){
   s = s || sesion;
   const cols = s.heads.slice();
-  const cab = cols.concat(['PARAMETRO','RESULTADO','COMENTARIO','FECHA CHEQUEO','REVISADO POR','REABIERTO']);
+  // columnas nuevas siempre al final (ver CLAUDE.md)
+  const cab = cols.concat(['PARAMETRO','RESULTADO','COMENTARIO','FECHA CHEQUEO','REVISADO POR','REABIERTO','CONDICION CORPORAL']);
   const fecha = fechaCorta(s.creado);
   const filas = [cab];
   for (const a of s.animales){
@@ -1250,7 +1538,8 @@ function filasExport(s){
       a.comentario || '',
       fecha,
       s.operario || config.operario || '',
-      s.reabierto ? 'SI' : 'NO'
+      s.reabierto ? 'SI' : 'NO',
+      ccNumero(a.cc)
     ]));
   }
   return filas;
@@ -1261,7 +1550,7 @@ function exportarExcel(s){
   try {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(filasExport(s));
-    ws['!cols'] = s.heads.map(() => ({wch:13})).concat([{wch:12},{wch:13},{wch:30},{wch:13},{wch:16},{wch:10}]);
+    ws['!cols'] = s.heads.map(() => ({wch:13})).concat([{wch:12},{wch:13},{wch:30},{wch:13},{wch:16},{wch:10},{wch:12}]);
     XLSX.utils.book_append_sheet(wb, ws, 'Chequeo');
     XLSX.writeFile(wb, 'chequeo_' + fechaCorta(s.creado).replace(/\//g,'-') + '.xlsx');
     toast('Excel descargado');
@@ -1271,17 +1560,24 @@ function exportarExcel(s){
   }
 }
 
+// '3.25' → 3.25 (número, para que la hoja y Excel lo puedan promediar); vacío si no se anotó
+function ccNumero(v){
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : '';
+}
 function payload(s){
   return {
     sesionId: s.id,
     fecha: s.creado,
     archivo: s.archivo || '',
     operario: s.operario || config.operario || '',
-    columnas: ['FECHA','SESION','ANIMAL','ESTADO','DEL','DUS','PARAMETRO','RESULTADO','COMENTARIO','REVISADO POR','AGREGADO EN CAMPO','REABIERTO'],
+    // columnas nuevas siempre al final, para no correr las filas viejas de la hoja
+    columnas: ['FECHA','SESION','ANIMAL','ESTADO','DEL','DUS','PARAMETRO','RESULTADO','COMENTARIO','REVISADO POR','AGREGADO EN CAMPO','REABIERTO','CONDICION CORPORAL'],
     filas: s.animales.map(a => ([
       fechaCorta(s.creado), s.id, a.num, a.estado, a.del, a.dus,
       a.motivos.join(', '), a.resultado || 'SIN REVISAR', a.comentario || '',
-      s.operario || config.operario || '', a.agregado ? 'SI' : 'NO', s.reabierto ? 'SI' : 'NO'
+      s.operario || config.operario || '', a.agregado ? 'SI' : 'NO', s.reabierto ? 'SI' : 'NO',
+      ccNumero(a.cc)
     ]))
   };
 }
@@ -1323,7 +1619,7 @@ function enviarSesion(){
     btn.disabled = true; btn.textContent = 'Enviando…';
     enviarASheet(sesion).then(() => {
       sesion.enviado = true;
-      sesion.enviadoEn = new Date().toISOString();
+      sesion.enviadoEn = ahoraISO();
       return guardarSesion();
     }).then(() => {
       toast('Enviado a la hoja de Google');
@@ -1346,13 +1642,16 @@ function sincronizarPendientes(manual){
   const uno = i => {
     if (i >= pend.length){
       cargarSesiones().then(() => { if (vista === 'inicio') pintarSesiones(); });
+      if (ok) programarSync(500);
       if (ok) toast(ok + (ok === 1 ? ' chequeo enviado' : ' chequeos enviados'));
       else if (manual) toast('No se pudo enviar. Revisa la conexión.');
       return;
     }
-    const s = pend[i];
+    // si es la que está abierta, se usa la copia en memoria para no perder lo que tiene
+    const s = (sesion && sesion.id === pend[i].id) ? sesion : pend[i];
     enviarASheet(s).then(() => {
-      s.enviado = true; s.enviadoEn = new Date().toISOString(); ok++;
+      s.enviado = true; s.enviadoEn = ahoraISO(); ok++;
+      s.actualizado = ahoraISO(); s.porSubir = true;
       return dbGuardar('sesiones', s);
     }).catch(e => console.error(e)).then(() => uno(i+1));
   };
@@ -1366,7 +1665,7 @@ function pintarAjustes(){
   document.getElementById('operario').value = config.operario || '';
   const info = document.getElementById('infoAlmacen');
   const pend = sesiones.filter(s => !s.enviado && s.animales.some(a => a.resultado)).length;
-  let txt = sesiones.length + ' chequeos guardados en la tablet · ' + pend + ' sin enviar.';
+  let txt = sesiones.length + ' chequeos en este dispositivo · ' + pend + ' sin enviar a la hoja.';
   info.textContent = txt;
   pintarListaChequeos();
   if (navigator.storage && navigator.storage.persisted){
@@ -1423,7 +1722,7 @@ function pintarDetalle(s){
     ? '<div class="aviso bien" style="margin-top:12px"><b>Enviado a la hoja de Google</b>' +
       (s.enviadoEn ? esc(fechaLarga(s.enviadoEn)) : '') +
       (s.reabierto ? ' · Se reabrió para corregir después de enviarse' : '') + '</div>'
-    : '<div class="aviso malo" style="margin-top:12px"><b>No se ha enviado a la hoja de Google</b>Solo está guardado en esta tablet.</div>';
+    : '<div class="aviso malo" style="margin-top:12px"><b>No se ha enviado a la hoja de Google</b>Todavía no está en la pestaña Chequeos. Se ve en todos los dispositivos, pero falta tocar «Guardar y enviar».</div>';
 
   html += '<div class="totales">' +
     [['Animales',tot], ['Preñadas',pren], ['Vacías',vac], ['Abortos',abo], ['Sin revisar',sinRev]]
@@ -1431,7 +1730,7 @@ function pintarDetalle(s){
   '</div></div>';
 
   html += '<div class="card"><h3>Animales</h3><div class="tabla-wrap" style="margin-top:10px"><table class="tabla-datos"><thead><tr>' +
-    '<th>Número</th><th>Estado</th><th>DEL</th><th>DUS</th><th>Parámetro</th><th>Resultado</th><th>Comentario</th>' +
+    '<th>Número</th><th>Estado</th><th>DEL</th><th>DUS</th><th>Parámetro</th><th>Resultado</th><th>CC</th><th>Comentario</th>' +
     '</tr></thead><tbody>' +
     s.animales.map(a => '<tr>' +
       '<td>' + esc(a.num) + '</td>' +
@@ -1440,6 +1739,7 @@ function pintarDetalle(s){
       '<td>' + esc(a.dus) + '</td>' +
       '<td>' + esc(a.motivos.join(', ')) + '</td>' +
       '<td>' + esc(a.resultado || 'Sin revisar') + '</td>' +
+      '<td>' + esc(ccTexto(a.cc)) + '</td>' +
       '<td>' + esc(a.comentario || '') + '</td>' +
     '</tr>').join('') +
   '</tbody></table></div></div>';
@@ -1467,12 +1767,26 @@ function borrarSesion(id){
   if (!s) return;
   const n = s.animales.length;
 
-  // nunca se envió: no hay nada que mover en la hoja, se borra solo de la tablet
+  // nunca se envió a la pestaña Chequeos: no hay filas que mover. Se marca como borrado
+  // (sirve sin internet) y la sincronización lo quita de los demás dispositivos.
   if (!s.enviado){
-    const texto = 'Se va a borrar este chequeo de la tablet: ' + n + (n === 1 ? ' animal' : ' animales') +
-      '. Nunca se envió a la hoja de Google, así que ahí no hay nada que borrar. ¿Continuar?';
+    const texto = 'Se va a borrar este chequeo (' + n + (n === 1 ? ' animal' : ' animales') +
+      ') de todos los dispositivos. Nunca se envió a la hoja de Google, así que ahí no hay filas que borrar. ¿Continuar?';
     if (!confirm(texto)) return;
-    quitarSesionLocal_(id).then(() => { irAtras(); toast('Chequeo borrado'); });
+    const marcada = (sesion && sesion.id === id) ? sesion : s;
+    marcada.borrado = true;
+    marcada.actualizado = ahoraISO();
+    marcada.porSubir = true;
+    dbGuardar('sesiones', marcada).then(() => {
+      if (sesion && sesion.id === id) sesion = null;
+      if (_sesionDetalle && _sesionDetalle.id === id) _sesionDetalle = null;
+      return cargarSesiones();
+    }).then(() => {
+      pintarListaChequeos();
+      irAtras();
+      toast('Chequeo borrado');
+      programarSync(500);
+    });
     return;
   }
 
@@ -1534,11 +1848,19 @@ function pintarRed(){
   if (navigator.onLine){ el.classList.remove('off'); t.textContent = 'Con internet'; }
   else { el.classList.add('off'); t.textContent = 'Sin internet · todo se guarda en la tablet'; }
 }
-window.addEventListener('online', () => { pintarRed(); sincronizarPendientes(false); if (vista === 'inicio') revisarPreparados(); });
-window.addEventListener('offline', pintarRed);
+window.addEventListener('online', () => { pintarRed(); sincronizarPendientes(false); sincronizarChequeos(); if (vista === 'inicio') revisarPreparados(); });
+window.addEventListener('offline', () => { pintarRed(); pintarSyncInfo(); });
 window.addEventListener('pin-invalido', () => {
-  asegurarPin('El PIN no es correcto. Escríbelo de nuevo.').then(() => { sincronizarPendientes(false); revisarPreparados(); });
+  asegurarPin('El PIN no es correcto. Escríbelo de nuevo.').then(() => { sincronizarPendientes(false); sincronizarChequeos(); revisarPreparados(); });
 });
+// al volver a la app (la tablet estuvo apagada o en otra app) se trae lo de los demás
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') programarSync(300);
+});
+// y mientras está abierta, cada 45 segundos, para ver lo que marcan en otra tablet
+setInterval(() => {
+  if (document.visibilityState === 'visible') sincronizarChequeos();
+}, 45000);
 
 window.addEventListener('beforeunload', () => { if (sesion) { try { dbGuardar('sesiones', sesion); } catch(e){} } });
 
@@ -1552,7 +1874,7 @@ function iniciar(){
       config.operario = o ? o.valor : '';
       ver('inicio', true);
       // el PIN se pide una vez por dispositivo; cuando ya está, se sube lo pendiente
-      asegurarPin().then(() => { sincronizarPendientes(false); revisarPreparados(); });
+      asegurarPin().then(() => { sincronizarPendientes(false); sincronizarChequeos(); revisarPreparados(); });
     })
     .catch(err => {
       console.error(err);

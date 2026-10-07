@@ -16,6 +16,13 @@
  *                       movimiento (por fecha_hora).
  *   Config_Lotes      → lista de lotes disponibles (se siembra con 1, 2, 3 al crearla).
  *   Trabajadores      → lista de nombres para el selector "¿quién eres?" (se crea vacía).
+ *   Sesiones_App      → copia completa de cada chequeo (también los que van a medias) para que
+ *                       aparezca en todos los dispositivos. Uso interno de la app: no editar a mano.
+ *
+ * VERSIÓN 10 — Chequeos compartidos entre dispositivos (acciones sesiones_lista,
+ * sesiones_traer y sesiones_guardar). Si dos dispositivos cambian el mismo chequeo, se
+ * combinan animal por animal (gana el cambio más reciente de cada animal). Al borrar un
+ * chequeo queda marcado como borrado en Sesiones_App para que desaparezca de los demás.
  *
  * VERSIÓN 9 — PIN de la finca. Toda solicitud (POST) debe traer "pin" y se compara con la
  * propiedad del script PIN_FINCA; si no coincide, responde {ok:false, error:'pinInvalido'}.
@@ -62,6 +69,10 @@ function doPost(e) {
     if (datos.accion === 'animal_reactivar')  return animalReactivar_(libro, datos);
     if (datos.accion === 'cargar_excel')      return cargarExcel_(libro, datos);
     if (datos.accion === 'lotes_estado')      return lotesEstado_(libro);
+    if (datos.accion === 'sesiones_lista')    return sesionesLista_(libro);
+    if (datos.accion === 'sesiones_traer')    return sesionesTraer_(libro, datos);
+    if (datos.accion === 'sesiones_guardar')  return sesionesGuardar_(libro, datos);
+    if (datos.accion) return salida_({ok: false, error: 'accionDesconocida'});
     return guardarChequeo_(libro, datos);
 
   } catch (err) {
@@ -130,6 +141,9 @@ function guardarChequeo_(libro, datos) {
    quita su fila de "Resumen". Devuelve cuántas filas movió.
    --------------------------------------------------------- */
 function borrar_(libro, datos) {
+  // que también desaparezca de los demás dispositivos
+  marcarSesionBorrada_(libro, datos.sesionId);
+
   var hoja = libro.getSheetByName('Chequeos');
   if (!hoja || hoja.getLastRow() < 2) {
     quitarDeResumen_(libro, datos.sesionId);
@@ -534,6 +548,197 @@ function cargarExcel_(libro, datos) {
   }
 
   return salida_({ok: true, creados: filasNuevas.length, yaExistian: yaExistian, sacados: sacados});
+}
+
+/* ---------------------------------------------------------
+   Chequeos compartidos entre dispositivos (Sesiones_App)
+   Cada chequeo se guarda completo como texto JSON. Como una celda admite
+   máximo 50.000 caracteres, el texto se parte en trozos: una fila por trozo
+   (PARTE 0, 1, 2…). Cada trozo empieza con "~" para que la hoja nunca lo
+   confunda con un número, una fecha o una fórmula.
+   --------------------------------------------------------- */
+var COLS_SES = ['SESION', 'ACTUALIZADO', 'BORRADO', 'PARTE', 'TEXTO'];
+var TAM_PARTE = 40000;
+
+function hojaSesiones_(libro) {
+  var existia = !!libro.getSheetByName('Sesiones_App');
+  var h = hoja_(libro, 'Sesiones_App', COLS_SES);
+  if (!existia) {
+    h.getRange('A:B').setNumberFormat('@');
+    h.getRange('E:E').setNumberFormat('@');
+  }
+  return h;
+}
+
+function textoCelda_(v) {
+  return v instanceof Date ? v.toISOString() : String(v === null || v === undefined ? '' : v);
+}
+
+/**
+ * Lee Sesiones_App y devuelve {id: {actualizado, borrado, filas:[nº de fila], partes:[texto]}}.
+ * Con conTexto=false no lee la columna TEXTO (lo que pesa).
+ */
+function leerSesionesApp_(h, conTexto) {
+  var mapa = {};
+  if (h.getLastRow() < 2) return mapa;
+  var ancho = conTexto ? 5 : 4;
+  var vals = h.getRange(2, 1, h.getLastRow() - 1, ancho).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    var id = textoCelda_(vals[i][0]);
+    if (!id) continue;
+    var m = mapa[id] || (mapa[id] = {actualizado: '', borrado: false, filas: [], partes: []});
+    m.filas.push(i + 2);
+    if (Number(vals[i][3]) === 0) {
+      m.actualizado = textoCelda_(vals[i][1]);
+      m.borrado = String(vals[i][2]) === 'SI';
+    }
+    if (conTexto) m.partes[Number(vals[i][3]) || 0] = String(vals[i][4]).replace(/^~/, '');
+  }
+  return mapa;
+}
+
+function sesionDeMapa_(m) {
+  if (!m) return null;
+  try { return JSON.parse(m.partes.join('')); } catch (err) { return null; }
+}
+
+/** POST accion=sesiones_lista — qué chequeos hay y cuándo cambió cada uno (sin el contenido). */
+function sesionesLista_(libro) {
+  var mapa = leerSesionesApp_(hojaSesiones_(libro), false);
+  var lista = Object.keys(mapa).map(function (id) {
+    return {id: id, actualizado: mapa[id].actualizado, borrado: mapa[id].borrado};
+  });
+  return salida_({ok: true, sesiones: lista});
+}
+
+/** POST accion=sesiones_traer — el contenido completo de los chequeos pedidos (ids). */
+function sesionesTraer_(libro, datos) {
+  var mapa = leerSesionesApp_(hojaSesiones_(libro), true);
+  var pedidos = datos.ids || [];
+  var lista = [];
+  for (var i = 0; i < pedidos.length; i++) {
+    var s = sesionDeMapa_(mapa[String(pedidos[i])]);
+    if (s) lista.push(s);
+  }
+  return salida_({ok: true, sesiones: lista});
+}
+
+/**
+ * POST accion=sesiones_guardar — recibe chequeos cambiados en un dispositivo, los combina
+ * con lo que ya hay y guarda el resultado. Devuelve el resultado solo de los que quedaron
+ * distintos a lo que mandó el dispositivo (porque otro dispositivo había cambiado algo).
+ */
+function sesionesGuardar_(libro, datos) {
+  var entrantes = datos.sesiones || [];
+  if (!entrantes.length) return salida_({ok: true, sesiones: []});
+
+  var candado = LockService.getScriptLock();
+  candado.waitLock(30000);
+  try {
+    var h = hojaSesiones_(libro);
+    var mapa = leerSesionesApp_(h, true);
+    var resultado = [];
+    var cambios = [];
+    for (var i = 0; i < entrantes.length; i++) {
+      var s = entrantes[i];
+      if (!s || !s.id) continue;
+      var id = String(s.id);
+      var combinada = fusionarSesiones_(sesionDeMapa_(mapa[id]), s);
+      cambios.push({id: id, sesion: combinada, filasViejas: mapa[id] ? mapa[id].filas : []});
+      resultado.push({id: id, sesion: JSON.stringify(combinada) === JSON.stringify(s) ? null : combinada});
+    }
+    escribirSesiones_(h, cambios);
+    return salida_({ok: true, sesiones: resultado});
+  } finally {
+    candado.releaseLock();
+  }
+}
+
+/** Reemplaza las filas de cada chequeo cambiado por su versión nueva, en un solo bloque. */
+function escribirSesiones_(h, cambios) {
+  var borrar = [];
+  var nuevas = [];
+  cambios.forEach(function (c) {
+    borrar = borrar.concat(c.filasViejas);
+    var texto = JSON.stringify(c.sesion);
+    var partes = Math.max(1, Math.ceil(texto.length / TAM_PARTE));
+    for (var p = 0; p < partes; p++) {
+      nuevas.push([c.id, String(c.sesion.actualizado || ''), c.sesion.borrado ? 'SI' : '',
+                   p, '~' + texto.slice(p * TAM_PARTE, (p + 1) * TAM_PARTE)]);
+    }
+  });
+  // de abajo hacia arriba, para no desordenar los números de fila al borrar
+  borrar.sort(function (a, b) { return b - a; });
+  for (var i = 0; i < borrar.length; i++) h.deleteRow(borrar[i]);
+  if (nuevas.length) {
+    var rango = h.getRange(h.getLastRow() + 1, 1, nuevas.length, COLS_SES.length);
+    rango.setNumberFormat('@');
+    rango.setValues(nuevas);
+  }
+}
+
+/** Deja el chequeo marcado como borrado, para que los demás dispositivos también lo quiten. */
+function marcarSesionBorrada_(libro, sesionId) {
+  if (!sesionId) return;
+  var candado = LockService.getScriptLock();
+  candado.waitLock(30000);
+  try {
+    var h = hojaSesiones_(libro);
+    var mapa = leerSesionesApp_(h, true);
+    var id = String(sesionId);
+    var s = sesionDeMapa_(mapa[id]) || {id: id, animales: []};
+    s.borrado = true;
+    s.actualizado = new Date().toISOString();
+    escribirSesiones_(h, [{id: id, sesion: s, filasViejas: mapa[id] ? mapa[id].filas : []}]);
+  } finally {
+    candado.releaseLock();
+  }
+}
+
+/**
+ * Combina dos versiones del mismo chequeo. Es la misma regla que usa la app (fusionarSesiones
+ * en chequeo/index.html) — si se cambia aquí, hay que cambiarla allá también:
+ *  - datos generales del chequeo: los de la versión cambiada más recientemente;
+ *  - cada animal: gana la versión con el cambio más reciente (mod) de ese animal;
+ *  - animales que solo están en una versión (agregados en campo): se conservan;
+ *  - borrado y reabierto, una vez puestos, se quedan;
+ *  - si algún animal cambió después del envío a la hoja, el chequeo vuelve a "sin enviar".
+ */
+function fusionarSesiones_(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  var base = String(b.actualizado || '') > String(a.actualizado || '') ? b : a;
+  var otra = base === a ? b : a;
+  var res = JSON.parse(JSON.stringify(base));
+  res.animales = res.animales || [];
+  var marca = function (x) { return String(x.mod || x.hora || ''); };
+  var posicion = {};
+  res.animales.forEach(function (x, i) { posicion[x.id] = i; });
+  var agregados = [], otros = [];
+  var cambio = false; // ¿el resultado quedó distinto de la versión base?
+  (otra.animales || []).forEach(function (x) {
+    if (posicion.hasOwnProperty(x.id)) {
+      var i = posicion[x.id];
+      if (marca(x) > marca(res.animales[i])) { res.animales[i] = JSON.parse(JSON.stringify(x)); cambio = true; }
+    } else {
+      (x.agregado ? agregados : otros).push(JSON.parse(JSON.stringify(x)));
+      cambio = true;
+    }
+  });
+  res.animales = agregados.concat(res.animales, otros);
+  if (otra.borrado && !res.borrado) { res.borrado = true; cambio = true; }
+  if (otra.reabierto && !res.reabierto) { res.reabierto = true; cambio = true; }
+  if (res.enviado && res.enviadoEn) {
+    var enviadoEn = String(res.enviadoEn);
+    if (res.animales.some(function (x) { return String(x.mod || '') > enviadoEn; })) { res.enviado = false; cambio = true; }
+  }
+  // Si quedó distinto de las dos versiones, su hora debe ser más nueva que ambas:
+  // así los dispositivos que tenían cualquiera de las dos saben que deben bajarla.
+  if (cambio) {
+    var t = Date.parse(res.actualizado || '');
+    res.actualizado = new Date((isNaN(t) ? new Date().getTime() : t) + 1).toISOString();
+  }
+  return res;
 }
 
 /* --------------------------------------------------------- */

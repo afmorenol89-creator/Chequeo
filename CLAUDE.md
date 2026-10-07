@@ -9,10 +9,13 @@ on a dairy farm's cattle herd, usable offline in the corral on a tablet. There i
 no package manager, and no test framework — this is hand-written static HTML/CSS/JS plus a Google
 Apps Script backend, deployed as-is.
 
-- `index.html` — the entire app: markup, CSS, and JS in one file.
+- `index.html` — home menu of the farm's tools (Chequeo reproductivo, Lotes de ordeño).
+- `chequeo/index.html` — the whole chequeo app: markup, CSS, and JS in one file.
+- `chequeo/xlsx.full.min.js` — vendored SheetJS, used to read/write Excel files client-side.
+- `lotes/` — the "Lotes de ordeño" tool (see `LOTES_ESPECIFICACION.md`); `comun/` — files shared
+  by both tools (`config.js` holds the fixed Apps Script URL and the farm PIN helpers).
 - `sw.js` — service worker (offline caching for the tablet).
 - `manifest.webmanifest` — PWA install metadata.
-- `xlsx.full.min.js` — vendored SheetJS, used to read/write Excel files client-side.
 - `apps-script.gs` — Google Apps Script Web App source. **Not deployed by this repo** — see below.
 - `INSTALACION.md` — end-user (Spanish) setup guide; read it before changing the deploy/setup flow.
 
@@ -44,16 +47,20 @@ No framework: a hand-rolled SPA. `<section id="v-*">` blocks are toggled via the
 `sesion` (the currently open chequeo, if any), `sesiones` (cached list of all saved chequeos),
 `config` (`urlSheet`, `operario`), `filtro`/`vista`/`pila`.
 
-Data lives in IndexedDB (`chequeo-repro` DB, stores `sesiones` and `config`) — persistent per device,
-never synced except through the explicit "send" flow below. Data model:
+Data lives in IndexedDB (`chequeo-repro` DB, stores `sesiones` and `config`) so everything works
+offline, and is **shared across devices** through the `Sesiones_App` sheet tab (see "Device sync"
+below). Data model:
 
 - **sesión**: `{id, creado, nombre, archivo, heads, colId/colStatus/colDel/colDus, operario, animales,
-  enviado, enviadoEn, reabierto, reabiertoEn}`. `enviado === true` means the session is **locked**
+  enviado, enviadoEn, reabierto, reabiertoEn, actualizado, porSubir, borrado}`. `enviado === true` means the session is **locked**
   (read-only in modo campo) because it's already on the Google Sheet — editing is blocked both in
   the UI (`disabled`/`readonly`) and defensively inside `marcar()`/`anotar()`/`agregarAnimal()`.
   `reabrirSesion()` is the only way to unlock it; it sets `reabierto = true` permanently (this flag
   is never cleared, even after the session is re-sent and re-locked).
-- **animal**: `{id, num, estado, del, dus, motivos, datos, resultado, comentario, agregado, hora}`.
+- **animal**: `{id, num, estado, del, dus, motivos, datos, resultado, comentario, cc, agregado, hora, mod}`.
+  `cc` is the condición corporal as a string `'1.00'`…`'5.00'` in 0.25 steps (or `''`); it goes to
+  the sheet/Excel as a number in the last column, `CONDICION CORPORAL`. `mod` is the ISO time of the
+  animal's last edit — set by `tocar(a)` on every edit and used to merge devices.
   `resultado` is `null | 'PREÑADA' | 'VACIA' | 'ABORTO'`. The Aborto button only renders when
   `esPrenada(a)` (i.e. `norm(a.estado)` starts with `pren`) — matching how `coincideEstado()` already
   does "starts with" state matching elsewhere.
@@ -72,6 +79,20 @@ computer and use "Enviar a la tablet" (`preparar_`/`pendientes_`/`traer_`/`recog
 **Export/send**: `filasExport(s)` and `payload(s)` both take an *optional* session argument
 (defaulting to the global `sesion`) — this lets read-only views (like the chequeo detail screen)
 export/inspect a session other than the one open in modo campo, without touching modo campo's state.
+
+**Device sync** (section 8b of `chequeo/index.html`, `sesiones_*` actions in `apps-script.gs`): each
+device keeps its own IndexedDB copy; `sincronizarChequeos()` runs on start, on reconnect, when the app
+becomes visible, every 45 s, and a few seconds after each local change. It lists `{id, actualizado,
+borrado}` from the sheet, uploads sessions with `porSubir` (or unknown to the sheet — this also
+migrates pre-sync sessions), downloads newer ones, and drops ones marked `borrado`. Conflicts are
+merged by `fusionarSesiones` (client) / `fusionarSesiones_` (server) — **the two must stay
+identical**: session fields from the newer `actualizado`, each animal by newer `mod`, animals present
+on only one side kept, `borrado`/`reabierto` sticky, and `enviado` reset if any animal changed after
+`enviadoEn`; when the merge differs from the base it bumps `actualizado` so every other device
+re-downloads. Deleting never removes the row in `Sesiones_App`: it leaves a tombstone (`borrado`).
+Sessions are stored as JSON split into 40,000-char rows (cell limit is 50,000), each prefixed with
+`~` so Sheets never coerces it. The older "Enviar a la tablet" (`preparar_`…) flow still works but
+sync makes it mostly redundant.
 
 ### Service worker (`sw.js`)
 
@@ -97,7 +118,7 @@ sheet tabs it creates/repairs on demand via `hoja_()`:
 are never rewritten, any new column must be appended at the **end** of the relevant `columnas`/
 header array — never inserted in the middle — or every historical row silently shifts under the
 wrong header. This has been the rule for every column added so far (`ABORTOS` in Resumen,
-`REABIERTO`/`AGREGADO EN CAMPO` in Chequeos).
+`REABIERTO`/`AGREGADO EN CAMPO`/`CONDICION CORPORAL` in Chequeos).
 
 ## Conventions
 
