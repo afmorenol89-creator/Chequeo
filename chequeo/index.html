@@ -307,6 +307,7 @@
     <div id="bannerPrep" style="margin-top:16px"></div>
     <div style="margin:16px 0">
       <button class="btn btn-verde" onclick="ver('cargar')">＋ Nuevo chequeo</button>
+      <button class="btn btn-borde" style="margin-top:10px" onclick="crearChequeoNovillas()">＋ Chequeo novillas monta natural</button>
     </div>
     <div class="sync-info" id="syncInfo"></div>
     <div id="listaSesiones"></div>
@@ -348,6 +349,23 @@
 
   <!-- ================= CAMPO ================= -->
   <section id="v-campo" class="oculto">
+    <!-- solo en el chequeo de novillas: se anota cada animal con un toque -->
+    <div class="card oculto" id="entradaRapida">
+      <h3>Anotar novilla</h3>
+      <div class="campo">
+        <label for="rapNum">Número del animal</label>
+        <input type="text" id="rapNum" inputmode="numeric" autocomplete="off">
+      </div>
+      <div class="campo">
+        <label for="rapNota">Comentario</label>
+        <input type="text" id="rapNota" autocomplete="off" placeholder="Opcional">
+      </div>
+      <div class="a-btns">
+        <button class="a-btn p" onclick="anotarNovilla('PREÑADA')"><span class="mk">●</span>Preñada</button>
+        <button class="a-btn v" onclick="anotarNovilla('VACIA')"><span class="mk">●</span>Vacía</button>
+        <button class="a-btn a" onclick="anotarNovilla('ABORTO')"><span class="mk">◆</span>Aborto</button>
+      </div>
+    </div>
     <div class="busca">
       <input type="text" id="buscar" inputmode="search" placeholder="Buscar número de animal" oninput="pintarLista()">
       <button class="icon-btn" onclick="limpiarBusqueda()" aria-label="Limpiar">✕</button>
@@ -528,6 +546,12 @@ function norm(v){
 function esPrenada(a){
   return norm(a.estado).startsWith('pren');
 }
+// Chequeo de novillas en monta natural: no viene de un Excel, se anota animal por animal.
+const NOMBRE_NOVILLAS = 'Chequeo novillas monta natural';
+function esManual(s){ return !!(s && s.tipo === 'novillas'); }
+// Animales que cuentan: los quitados quedan marcados (borrado) para que la sincronización
+// no los devuelva desde otro dispositivo, pero no se muestran, no se cuentan ni se envían.
+function vivos(s){ return ((s && s.animales) || []).filter(a => !a.borrado); }
 function numero(v){
   if (v === null || v === undefined || v === '') return null;
   if (typeof v === 'number') return isFinite(v) ? v : null;
@@ -604,7 +628,7 @@ function ver(v, sinPila){
   const t = document.getElementById('titulo'), s = document.getElementById('subtitulo');
   if (v === 'inicio'){ t.textContent = 'Chequeo reproductivo'; s.textContent = 'La Morelia'; }
   else if (v === 'cargar'){ t.textContent = 'Nuevo chequeo'; s.textContent = 'Cargar y filtrar'; }
-  else if (v === 'campo'){ t.textContent = sesion ? sesion.nombre : 'Chequeo'; s.textContent = (sesion && sesion.enviado) ? 'Chequeo cerrado · solo lectura' : 'Toca preñada o vacía en cada animal'; }
+  else if (v === 'campo'){ t.textContent = sesion ? sesion.nombre : 'Chequeo'; s.textContent = (sesion && sesion.enviado) ? 'Chequeo cerrado · solo lectura' : (esManual(sesion) ? 'Anota cada novilla con su resultado' : 'Toca preñada o vacía en cada animal'); }
   else if (v === 'agregar'){ t.textContent = 'Agregar animal'; s.textContent = ''; }
   else if (v === 'ajustes'){ t.textContent = 'Ajustes'; s.textContent = ''; }
   else if (v === 'sesion'){ t.textContent = 'Chequeo guardado'; s.textContent = ''; }
@@ -814,6 +838,34 @@ function animalesDelBorrador(){
   }));
 }
 
+// Chequeo sin Excel: empieza vacío y se anota cada novilla con número y resultado.
+function crearChequeoNovillas(){
+  const ahora = new Date();
+  sesion = {
+    id: 'ses_' + ahora.getTime(),
+    tipo: 'novillas',
+    creado: ahora.toISOString(),
+    nombre: NOMBRE_NOVILLAS,
+    archivo: NOMBRE_NOVILLAS, // así se distingue en la columna ARCHIVO de Resumen
+    heads: [],
+    colId: '', colStatus: '', colDel: '', colDus: '',
+    operario: config.operario || '',
+    animales: [],
+    enviado: false,
+    enviadoEn: null
+  };
+  guardarSesion().then(() => {
+    filtro = 'todas';
+    setFiltro('todas');
+    document.getElementById('buscar').value = '';
+    document.getElementById('rapNum').value = '';
+    document.getElementById('rapNota').value = '';
+    ver('campo');
+    pintarLista();
+    setTimeout(() => document.getElementById('rapNum').focus(), 100);
+  });
+}
+
 function crearSesion(){
   if (!borrador || !borrador.sel || !borrador.sel.length) return;
   const ahora = new Date();
@@ -883,7 +935,7 @@ function limpiarBusqueda(){
 function animalesVisibles(){
   if (!sesion) return [];
   const q = norm(document.getElementById('buscar').value);
-  return sesion.animales.filter(a => {
+  return vivos(sesion).filter(a => {
     if (filtro === 'pend' && a.resultado) return false;
     if (filtro === 'prenadas' && a.resultado !== 'PREÑADA') return false;
     if (filtro === 'vacias' && a.resultado !== 'VACIA') return false;
@@ -908,16 +960,20 @@ function pintarLista(){
   actualizarProgreso();
   actualizarEstadoCierre();
 
+  const manual = esManual(sesion);
   if (!vis.length){
-    cont.innerHTML = '<div class="vacio"><span class="ic">🔎</span>' +
-      (filtro === 'pend' ? 'No quedan animales pendientes.' : 'Ningún animal con esa búsqueda.') + '</div>';
+    cont.innerHTML = (manual && !vivos(sesion).length)
+      ? '<div class="vacio"><span class="ic">🐄</span>Todavía no hay novillas anotadas.<br>Escribe el número arriba y toca el resultado.</div>'
+      : '<div class="vacio"><span class="ic">🔎</span>' +
+        (filtro === 'pend' ? 'No quedan animales pendientes.' : 'Ningún animal con esa búsqueda.') + '</div>';
     return;
   }
 
   let html = '', estadoPrev = null;
   for (const a of vis){
     const est = a.estado || 'Sin estado';
-    if (est !== estadoPrev && !document.getElementById('buscar').value){
+    // en el de novillas todas tienen el mismo estado: el título de grupo sobra
+    if (!manual && est !== estadoPrev && !document.getElementById('buscar').value){
       html += '<div class="grupo">' + esc(est) + '</div>';
       estadoPrev = est;
     }
@@ -926,26 +982,29 @@ function pintarLista(){
       '<div class="a-head">' +
         '<div class="a-num">' + esc(a.num || '—') + '</div>' +
         '<div class="a-meta">' +
-          (a.agregado ? '<span class="chip nuevo">Agregado en campo</span>' : '<span class="chip estado">' + esc(a.estado) + '</span>') +
+          (manual ? '<span class="chip estado">Novilla</span>' :
+            a.agregado ? '<span class="chip nuevo">Agregado en campo</span>' : '<span class="chip estado">' + esc(a.estado) + '</span>') +
           (a.del !== '' && a.del !== undefined ? '<span class="chip">DEL ' + esc(a.del) + '</span>' : '') +
           (a.dus !== '' && a.dus !== undefined ? '<span class="chip">DUS ' + esc(a.dus) + '</span>' : '') +
-          a.motivos.map(m => '<span class="chip param">' + esc(m) + '</span>').join('') +
+          (manual ? '' : a.motivos.map(m => '<span class="chip param">' + esc(m) + '</span>').join('')) +
         '</div>' +
       '</div>' +
       '<div class="a-btns">' +
         botonResultado(a, 'PREÑADA', 'p', '●', 'Preñada', cerrado) +
         botonResultado(a, 'VACIA', 'v', '●', 'Vacía', cerrado) +
-        (esPrenada(a) ? botonResultado(a, 'ABORTO', 'a', '◆', 'Aborto', cerrado) : '') +
+        (manual || esPrenada(a) ? botonResultado(a, 'ABORTO', 'a', '◆', 'Aborto', cerrado) : '') +
       '</div>' +
       '<div class="a-extra">' +
         '<textarea class="a-nota' + (a.comentario ? ' tiene' : '') + '" rows="1" placeholder="Comentario" ' +
           (cerrado ? 'readonly ' : '') +
           'oninput="anotar(\'' + a.id + '\', this.value)">' + esc(a.comentario) + '</textarea>' +
+        (manual ? '' :
         '<select class="a-cc' + (a.cc ? ' tiene' : '') + '" aria-label="Condición corporal" ' +
           (cerrado ? 'disabled ' : '') +
-          'onchange="ponerCC(\'' + a.id + '\', this.value, this)">' + opcionesCC(a.cc || '', 'CC —') + '</select>' +
+          'onchange="ponerCC(\'' + a.id + '\', this.value, this)">' + opcionesCC(a.cc || '', 'CC —') + '</select>') +
       '</div>' +
-      (a.agregado ? '' : '<button class="ver-mas" onclick="verDatos(\'' + a.id + '\', this)">Ver todos los datos</button>') +
+      (manual ? (cerrado ? '' : '<button class="ver-mas" onclick="quitarAnimal(\'' + a.id + '\')">Quitar de este chequeo</button>') :
+        a.agregado ? '' : '<button class="ver-mas" onclick="verDatos(\'' + a.id + '\', this)">Ver todos los datos</button>') +
       '<div class="a-datos oculto" id="dt_' + a.id + '"></div>' +
     '</article>';
   }
@@ -966,8 +1025,11 @@ function actualizarEstadoCierre(){
     }
   }
 
+  const manual = esManual(sesion);
   const btnAg = document.getElementById('btnAgregarAnimal');
-  if (btnAg) btnAg.classList.toggle('oculto', cerrado);
+  if (btnAg) btnAg.classList.toggle('oculto', cerrado || manual);
+  const entrada = document.getElementById('entradaRapida');
+  if (entrada) entrada.classList.toggle('oculto', cerrado || !manual);
 
   const btnEnviar = document.getElementById('btnEnviar');
   if (btnEnviar){
@@ -997,11 +1059,11 @@ function reabrirSesion(){
 }
 function actualizarProgreso(){
   if (!sesion) return;
-  const tot = sesion.animales.length;
-  const hechas = sesion.animales.filter(a => a.resultado).length;
-  const pren = sesion.animales.filter(a => a.resultado === 'PREÑADA').length;
-  const vac = sesion.animales.filter(a => a.resultado === 'VACIA').length;
-  const abo = sesion.animales.filter(a => a.resultado === 'ABORTO').length;
+  const tot = vivos(sesion).length;
+  const hechas = vivos(sesion).filter(a => a.resultado).length;
+  const pren = vivos(sesion).filter(a => a.resultado === 'PREÑADA').length;
+  const vac = vivos(sesion).filter(a => a.resultado === 'VACIA').length;
+  const abo = vivos(sesion).filter(a => a.resultado === 'ABORTO').length;
   document.getElementById('progHecho').textContent = hechas;
   document.getElementById('progTotal').textContent = tot;
   document.getElementById('progFill').style.width = (tot ? (hechas/tot*100) : 0) + '%';
@@ -1087,6 +1149,56 @@ function prepararAgregar(){
   document.getElementById('nvNota').value = '';
   document.getElementById('nvCC').innerHTML = opcionesCC('', 'Sin anotar');
   setTimeout(() => document.getElementById('nvNum').focus(), 100);
+}
+function anotarNovilla(resultado){
+  if (!esManual(sesion) || sesion.enviado) return; // cerrado: de solo lectura hasta que se reabra
+  const inNum = document.getElementById('rapNum');
+  const inNota = document.getElementById('rapNota');
+  const num = inNum.value.trim();
+  if (!num){ toast('Escribe el número del animal'); inNum.focus(); return; }
+
+  // repetida: no se duplica, se muestra la que ya está para corregirla ahí
+  const ya = vivos(sesion).find(a => norm(a.num) === norm(num));
+  if (ya){
+    toast('La ' + num + ' ya está anotada en este chequeo');
+    filtro = 'todas'; setFiltro('todas');
+    document.getElementById('buscar').value = num;
+    pintarLista();
+    const tarjeta = document.getElementById('an_' + ya.id);
+    if (tarjeta) tarjeta.scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
+
+  const nuevo = {
+    // el id lleva algo al azar: dos tablets pueden anotar en el mismo milisegundo
+    id: 'nov_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+    num, estado: 'NOVILLA', del:'', dus:'',
+    motivos: ['MONTA NATURAL'], datos: {}, resultado, comentario: inNota.value.trim(), cc: '',
+    agregado: true, hora: new Date().toISOString()
+  };
+  sesion.animales.unshift(nuevo);
+  tocar(nuevo);
+  sesion.enviado = false;
+  inNum.value = '';
+  inNota.value = '';
+  document.getElementById('buscar').value = '';
+  guardarSesion().then(() => {
+    pintarLista();
+    toast(num + ' · ' + (resultado === 'PREÑADA' ? 'Preñada' : resultado === 'VACIA' ? 'Vacía' : 'Aborto'));
+    inNum.focus();
+  });
+}
+// Quitar una novilla anotada por error. No se elimina: queda marcada como borrada (con su hora),
+// porque al combinar dispositivos un animal que solo está en una versión se conserva y volvería.
+function quitarAnimal(id){
+  if (!esManual(sesion) || sesion.enviado) return;
+  const a = buscarAnimal(id);
+  if (!a) return;
+  if (!confirm('¿Quitar la ' + a.num + ' de este chequeo?')) return;
+  a.borrado = true;
+  tocar(a);
+  sesion.enviado = false;
+  guardarSesion().then(() => { pintarLista(); toast('Se quitó la ' + a.num); });
 }
 function agregarAnimal(){
   if (sesion && sesion.enviado){ toast('Este chequeo está cerrado. Reábrelo para agregar animales.'); ver('campo'); return; }
@@ -1258,18 +1370,19 @@ function pintarSesiones(){
     return;
   }
   cont.innerHTML = sesiones.map(s => {
-    const hechas = s.animales.filter(a => a.resultado).length;
-    const pren = s.animales.filter(a => a.resultado === 'PREÑADA').length;
-    const vac = s.animales.filter(a => a.resultado === 'VACIA').length;
-    const abo = s.animales.filter(a => a.resultado === 'ABORTO').length;
+    const vs = vivos(s);
+    const hechas = vs.filter(a => a.resultado).length;
+    const pren = vs.filter(a => a.resultado === 'PREÑADA').length;
+    const vac = vs.filter(a => a.resultado === 'VACIA').length;
+    const abo = vs.filter(a => a.resultado === 'ABORTO').length;
     const pip = s.enviado ? 'pip-sync' : (hechas ? 'pip-pend' : 'pip-local');
-    const estado = s.enviado ? 'Enviado' : (hechas === s.animales.length && hechas > 0 ? 'Sin enviar' : 'En curso');
+    const estado = s.enviado ? 'Enviado' : (hechas === vs.length && hechas > 0 ? 'Sin enviar' : 'En curso');
     return '<div class="card" style="padding:12px 14px">' +
       '<button class="ses" onclick="abrirSesion(\'' + s.id + '\')">' +
         '<span class="ses-pip ' + pip + '"></span>' +
         '<span class="ses-info">' +
           '<span class="ses-fecha">' + esc(fechaLarga(s.creado)) + '</span>' +
-          '<span class="ses-det">' + hechas + ' de ' + s.animales.length + ' revisadas · ' + pren + ' preñadas · ' + vac + ' vacías · ' + abo + ' abortos · ' + estado + '</span>' +
+          '<span class="ses-det">' + (esManual(s) ? 'Novillas monta natural · ' + vs.length + ' anotadas · ' : hechas + ' de ' + vs.length + ' revisadas · ') + pren + ' preñadas · ' + vac + ' vacías · ' + abo + ' abortos · ' + estado + '</span>' +
         '</span>' +
         '<span class="ses-flecha">›</span>' +
       '</button></div>';
@@ -1425,7 +1538,7 @@ function repintarSesionAbierta(){
   _repintarPendiente = false;
   // sin ver(): eso sube la pantalla al principio y el trabajador perdería por dónde iba
   document.getElementById('titulo').textContent = sesion.nombre || 'Chequeo';
-  document.getElementById('subtitulo').textContent = sesion.enviado ? 'Chequeo cerrado · solo lectura' : 'Toca preñada o vacía en cada animal';
+  document.getElementById('subtitulo').textContent = sesion.enviado ? 'Chequeo cerrado · solo lectura' : (esManual(sesion) ? 'Anota cada novilla con su resultado' : 'Toca preñada o vacía en cada animal');
   pintarLista();
 }
 document.getElementById('lista').addEventListener('focusout', () => {
@@ -1537,12 +1650,23 @@ function pintarSyncInfo(){
 // pero la vista de detalle (solo lectura) puede pasar cualquier otra.
 function filasExport(s){
   s = s || sesion;
+  // novillas: no hay columnas de DairyPlan ni condición corporal, solo lo anotado
+  if (esManual(s)){
+    const fecha = fechaCorta(s.creado);
+    return [['ANIMAL','RESULTADO','COMENTARIO','FECHA CHEQUEO','REVISADO POR','REABIERTO']].concat(
+      vivos(s).map(a => {
+        const n = numero(a.num);
+        return [(n !== null && /^[\d.,\s-]+$/.test(String(a.num))) ? n : a.num,
+                a.resultado || 'SIN REVISAR', a.comentario || '', fecha,
+                s.operario || config.operario || '', s.reabierto ? 'SI' : 'NO'];
+      }));
+  }
   const cols = s.heads.slice();
   // columnas nuevas siempre al final (ver CLAUDE.md)
   const cab = cols.concat(['PARAMETRO','RESULTADO','COMENTARIO','FECHA CHEQUEO','REVISADO POR','REABIERTO','CONDICION CORPORAL']);
   const fecha = fechaCorta(s.creado);
   const filas = [cab];
-  for (const a of s.animales){
+  for (const a of vivos(s)){
     const f = cols.map(c => {
       if (a.datos && a.datos[c] !== undefined && a.datos[c] !== '') return a.datos[c];
       if (c === s.colId) return a.num;
@@ -1574,9 +1698,11 @@ function exportarExcel(s){
   try {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(filasExport(s));
-    ws['!cols'] = s.heads.map(() => ({wch:13})).concat([{wch:12},{wch:13},{wch:30},{wch:13},{wch:16},{wch:10},{wch:12}]);
+    ws['!cols'] = esManual(s)
+      ? [{wch:12},{wch:13},{wch:30},{wch:13},{wch:16},{wch:10}]
+      : s.heads.map(() => ({wch:13})).concat([{wch:12},{wch:13},{wch:30},{wch:13},{wch:16},{wch:10},{wch:12}]);
     XLSX.utils.book_append_sheet(wb, ws, 'Chequeo');
-    XLSX.writeFile(wb, 'chequeo_' + fechaCorta(s.creado).replace(/\//g,'-') + '.xlsx');
+    XLSX.writeFile(wb, (esManual(s) ? 'novillas_monta_natural_' : 'chequeo_') + fechaCorta(s.creado).replace(/\//g,'-') + '.xlsx');
     toast('Excel descargado');
   } catch(e){
     toast('No se pudo crear el Excel');
@@ -1597,10 +1723,10 @@ function payload(s){
     operario: s.operario || config.operario || '',
     // columnas nuevas siempre al final, para no correr las filas viejas de la hoja
     columnas: ['FECHA','SESION','ANIMAL','ESTADO','DEL','DUS','PARAMETRO','RESULTADO','COMENTARIO','REVISADO POR','AGREGADO EN CAMPO','REABIERTO','CONDICION CORPORAL'],
-    filas: s.animales.map(a => ([
+    filas: vivos(s).map(a => ([
       fechaCorta(s.creado), s.id, a.num, a.estado, a.del, a.dus,
       a.motivos.join(', '), a.resultado || 'SIN REVISAR', a.comentario || '',
-      s.operario || config.operario || '', a.agregado ? 'SI' : 'NO', s.reabierto ? 'SI' : 'NO',
+      s.operario || config.operario || '', (a.agregado && !esManual(s)) ? 'SI' : 'NO', s.reabierto ? 'SI' : 'NO',
       ccNumero(a.cc)
     ]))
   };
@@ -1626,7 +1752,8 @@ function enviarASheet(s){
 }
 function enviarSesion(){
   if (!sesion) return;
-  const pend = sesion.animales.filter(a => !a.resultado).length;
+  if (!vivos(sesion).length){ toast('No hay animales anotados para enviar'); return; }
+  const pend = vivos(sesion).filter(a => !a.resultado).length;
   const seguir = pend === 0 || confirm('Quedan ' + pend + ' animales sin revisar. ¿Enviar de todas formas?');
   if (!seguir) return;
   sesion.operario = sesion.operario || config.operario || '';
@@ -1696,7 +1823,7 @@ function sincronizarPendientes(manual){
 function pintarAjustes(){
   document.getElementById('operario').value = config.operario || '';
   const info = document.getElementById('infoAlmacen');
-  const pend = sesiones.filter(s => !s.enviado && s.animales.some(a => a.resultado)).length;
+  const pend = sesiones.filter(s => !s.enviado && vivos(s).some(a => a.resultado)).length;
   let txt = sesiones.length + ' chequeos en este dispositivo · ' + pend + ' sin enviar a la hoja.';
   info.textContent = txt;
   pintarListaChequeos();
@@ -1716,11 +1843,11 @@ function pintarListaChequeos(){
     return;
   }
   cont.innerHTML = sesiones.map(s => {
-    const estado = s.enviado ? 'Enviado' : (s.animales.some(a => a.resultado) ? 'Sin enviar' : 'Sin empezar');
+    const estado = s.enviado ? 'Enviado' : (vivos(s).some(a => a.resultado) ? 'Sin enviar' : 'Sin empezar');
     return '<button class="ses" style="padding:9px 0;border-bottom:1px dotted #e6ebe3" onclick="verDetalle(\'' + s.id + '\')">' +
       '<span class="ses-info">' +
         '<span style="font-weight:700">' + esc(fechaCorta(s.creado)) + '</span>' +
-        '<span class="ses-det">' + s.animales.length + ' animales · ' + estado + '</span>' +
+        '<span class="ses-det">' + (esManual(s) ? 'Novillas monta natural · ' : '') + vivos(s).length + ' animales · ' + estado + '</span>' +
       '</span>' +
       '<span class="ses-flecha">›</span>' +
     '</button>';
@@ -1739,15 +1866,16 @@ function verDetalle(id){
 function pintarDetalle(s){
   const cont = document.getElementById('resumenSesion');
   if (!cont) return;
-  const tot = s.animales.length;
-  const pren = s.animales.filter(a => a.resultado === 'PREÑADA').length;
-  const vac = s.animales.filter(a => a.resultado === 'VACIA').length;
-  const abo = s.animales.filter(a => a.resultado === 'ABORTO').length;
-  const sinRev = s.animales.filter(a => !a.resultado).length;
+  const vs = vivos(s);
+  const tot = vs.length;
+  const pren = vs.filter(a => a.resultado === 'PREÑADA').length;
+  const vac = vs.filter(a => a.resultado === 'VACIA').length;
+  const abo = vs.filter(a => a.resultado === 'ABORTO').length;
+  const sinRev = vs.filter(a => !a.resultado).length;
 
   let html = '<div class="card">' +
     '<h3>' + esc(fechaLarga(s.creado)) + '</h3>' +
-    '<div class="card-sub">Archivo: ' + esc(s.archivo || '—') + '</div>' +
+    (esManual(s) ? '<div class="card-sub">' + esc(NOMBRE_NOVILLAS) + '</div>' : '<div class="card-sub">Archivo: ' + esc(s.archivo || '—') + '</div>') +
     '<div class="card-sub">Revisó: ' + esc(s.operario || '—') + '</div>';
 
   html += s.enviado
@@ -1761,10 +1889,22 @@ function pintarDetalle(s){
       .map(([etq,val]) => '<div><b>' + val + '</b><span>' + esc(etq) + '</span></div>').join('') +
   '</div></div>';
 
+  // novillas: sin estado, DEL, DUS, parámetro ni CC (irían vacíos)
+  if (esManual(s)){
+    html += '<div class="card"><h3>Novillas</h3><div class="tabla-wrap" style="margin-top:10px"><table class="tabla-datos"><thead><tr>' +
+      '<th>Número</th><th>Resultado</th><th>Comentario</th>' +
+      '</tr></thead><tbody>' +
+      vs.map(a => '<tr>' +
+        '<td>' + esc(a.num) + '</td>' +
+        '<td>' + esc(a.resultado || 'Sin revisar') + '</td>' +
+        '<td>' + esc(a.comentario || '') + '</td>' +
+      '</tr>').join('') +
+    '</tbody></table></div></div>';
+  } else
   html += '<div class="card"><h3>Animales</h3><div class="tabla-wrap" style="margin-top:10px"><table class="tabla-datos"><thead><tr>' +
     '<th>Número</th><th>Estado</th><th>DEL</th><th>DUS</th><th>Parámetro</th><th>Resultado</th><th>CC</th><th>Comentario</th>' +
     '</tr></thead><tbody>' +
-    s.animales.map(a => '<tr>' +
+    vs.map(a => '<tr>' +
       '<td>' + esc(a.num) + '</td>' +
       '<td>' + esc(a.estado) + '</td>' +
       '<td>' + esc(a.del) + '</td>' +
@@ -1797,7 +1937,7 @@ function quitarSesionLocal_(id){
 function borrarSesion(id){
   const s = sesiones.find(x => x.id === id);
   if (!s) return;
-  const n = s.animales.length;
+  const n = vivos(s).length;
 
   // nunca se envió a la pestaña Chequeos: no hay filas que mover. Se marca como borrado
   // (sirve sin internet) y la sincronización lo quita de los demás dispositivos.

@@ -58,7 +58,7 @@ Data lives in IndexedDB (`chequeo-repro` DB, stores `sesiones` and `config`) so 
 offline, and is **shared across devices** through the `Sesiones_App` sheet tab (see "Device sync"
 below). Data model:
 
-- **sesión**: `{id, creado, nombre, archivo, heads, colId/colStatus/colDel/colDus, operario, animales,
+- **sesión**: `{id, tipo, creado, nombre, archivo, heads, colId/colStatus/colDel/colDus, operario, animales,
   enviado, enviadoEn, porEnviar, reabierto, reabiertoEn, actualizado, porSubir, borrado}`. `enviado === true` means the session is **locked**
   (read-only in modo campo) because it's already on the Google Sheet — editing is blocked both in
   the UI (`disabled`/`readonly`) and defensively inside `marcar()`/`anotar()`/`agregarAnimal()`.
@@ -67,7 +67,17 @@ below). Data model:
   `porEnviar === true` means someone tapped «Guardar y enviar» but it hasn't reached the
   `Chequeos` tab yet; only those are auto-sent (`sincronizarPendientes`). A half-done chequeo
   without it is **never** auto-sent — sending locks it on every device.
-- **animal**: `{id, num, estado, del, dus, motivos, datos, resultado, comentario, cc, agregado, hora, mod}`.
+- **Chequeo novillas monta natural** (`tipo: 'novillas'`, `esManual(s)`): created empty by
+  `crearChequeoNovillas()` — no Excel, `heads: []`. The worker types each animal in the
+  `#entradaRapida` box (`anotarNovilla(resultado)`: number + Preñada/Vacía/Aborto + comment;
+  a repeated number is shown, not duplicated). Aborto is always available, no CC. Rows go to the
+  sheet with ESTADO `NOVILLA`, PARAMETRO `MONTA NATURAL`, and the name in Resumen's ARCHIVO; the
+  Excel export and the detail screen have their own reduced columns. Same `columnas` as every other
+  chequeo in `payload()` — never give it different sheet columns.
+- **animal**: `{id, num, estado, del, dus, motivos, datos, resultado, comentario, cc, agregado, hora, mod, borrado}`.
+  `borrado` (only via `quitarAnimal`, novillas chequeo) is a tombstone, not a removal: the merge
+  keeps animals present on only one side, so a deleted one would come back from another device.
+  Use `vivos(s)` instead of `s.animales` anywhere animals are listed, counted, exported or sent.
   `cc` is the condición corporal as a string `'1.00'`…`'5.00'` in 0.25 steps (or `''`); it goes to
   the sheet/Excel as a number in the last column, `CONDICION CORPORAL`. `mod` is the ISO time of the
   animal's last edit — set by `tocar(a)` on every edit and used to merge devices.
