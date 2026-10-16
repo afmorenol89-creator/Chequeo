@@ -1044,9 +1044,9 @@ function actualizarEstadoCierre(){
     }
   }
 }
-function reabrirSesion(){
+async function reabrirSesion(){
   if (!sesion || !sesion.enviado) return;
-  const ok = confirm('Vas a reabrir este chequeo para corregirlo. Al volver a enviarlo, se van a reemplazar las filas de este chequeo en la hoja de Google. ¿Continuar?');
+  const ok = await confirmar('Vas a reabrir este chequeo para corregirlo. Al volver a enviarlo, se van a reemplazar las filas de este chequeo en la hoja de Google. ¿Continuar?', 'Reabrir');
   if (!ok) return;
   sesion.enviado = false;
   sesion.reabierto = true;
@@ -1190,11 +1190,12 @@ function anotarNovilla(resultado){
 }
 // Quitar una novilla anotada por error. No se elimina: queda marcada como borrada (con su hora),
 // porque al combinar dispositivos un animal que solo está en una versión se conserva y volvería.
-function quitarAnimal(id){
+async function quitarAnimal(id){
   if (!esManual(sesion) || sesion.enviado) return;
   const a = buscarAnimal(id);
   if (!a) return;
-  if (!confirm('¿Quitar la ' + a.num + ' de este chequeo?')) return;
+  if (!(await confirmar('¿Quitar la ' + a.num + ' de este chequeo?', 'Quitar', true))) return;
+  if (!sesion || sesion.enviado || a.borrado) return; // pudo cambiar mientras se preguntaba
   a.borrado = true;
   tocar(a);
   sesion.enviado = false;
@@ -1750,11 +1751,11 @@ function enviarASheet(s){
     return t;
   });
 }
-function enviarSesion(){
+async function enviarSesion(){
   if (!sesion) return;
   if (!vivos(sesion).length){ toast('No hay animales anotados para enviar'); return; }
   const pend = vivos(sesion).filter(a => !a.resultado).length;
-  const seguir = pend === 0 || confirm('Quedan ' + pend + ' animales sin revisar. ¿Enviar de todas formas?');
+  const seguir = pend === 0 || await confirmar('Quedan ' + pend + ' animales sin revisar. ¿Enviar de todas formas?', 'Enviar');
   if (!seguir) return;
   sesion.operario = sesion.operario || config.operario || '';
   // queda en cola: si ahora no se puede, lo envía la próxima sincronización (este u otro dispositivo)
@@ -1934,7 +1935,7 @@ function quitarSesionLocal_(id){
   });
 }
 
-function borrarSesion(id){
+async function borrarSesion(id){
   const s = sesiones.find(x => x.id === id);
   if (!s) return;
   const n = vivos(s).length;
@@ -1944,7 +1945,7 @@ function borrarSesion(id){
   if (!s.enviado){
     const texto = 'Se va a borrar este chequeo (' + n + (n === 1 ? ' animal' : ' animales') +
       ') de todos los dispositivos. Nunca se envió a la hoja de Google, así que ahí no hay filas que borrar. ¿Continuar?';
-    if (!confirm(texto)) return;
+    if (!(await confirmar(texto, 'Borrar', true))) return;
     const marcada = (sesion && sesion.id === id) ? sesion : s;
     marcada.borrado = true;
     marcada.actualizado = ahoraISO();
@@ -1965,7 +1966,7 @@ function borrarSesion(id){
   const texto = 'Vas a borrar este chequeo: se pierden ' + n + (n === 1 ? ' animal' : ' animales') +
     ' de la tablet y ' + n + (n === 1 ? ' fila' : ' filas') +
     ' de la hoja de Google (se mueven a la papelera, no se eliminan). ¿Continuar?';
-  if (!confirm(texto)) return;
+  if (!(await confirmar(texto, 'Borrar', true))) return;
 
   // sin internet no se puede tocar la hoja: no se borra nada, ni de la tablet
   if (!navigator.onLine){

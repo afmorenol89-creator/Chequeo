@@ -578,8 +578,8 @@ function pintarFicha(){
 }
 
 /** Saca al animal de ordeño (con confirmación) y lo quita de la lista de activos. */
-function ejecutarSacar(a, motivo){
-  if (!confirm('¿Sacar a ' + a.numero + ' ' + (a.nombre || '') + ' por ' + motivo.toLowerCase() + '?')) return;
+async function ejecutarSacar(a, motivo){
+  if (!(await confirmar('¿Sacar a ' + a.numero + ' ' + (a.nombre || '') + ' por ' + motivo.toLowerCase() + '?', 'Sacar', true))) return;
 
   const datos = {
     numero: a.numero, motivo, usuario: config.usuario,
@@ -604,11 +604,11 @@ function ejecutarSacar(a, motivo){
   }
 }
 
-function confirmarMoverLote(loteNuevo){
+async function confirmarMoverLote(loteNuevo){
   const a = animalesPorNumero[animalSeleccionado];
   if (!a) return;
   const desde = a.lote ? ('del Lote ' + a.lote) : 'sin lote';
-  if (!confirm('¿Mover ' + a.numero + ' ' + (a.nombre || '') + ' ' + desde + ' al Lote ' + loteNuevo + '?')) return;
+  if (!(await confirmar('¿Mover ' + a.numero + ' ' + (a.nombre || '') + ' ' + desde + ' al Lote ' + loteNuevo + '?', 'Mover'))) return;
 
   registrarMovimiento(a, loteNuevo);
   pintarFicha();
@@ -795,10 +795,10 @@ function pintarSalidas(){
   });
 }
 
-function reactivarDesdeSalidas(numero){
+async function reactivarDesdeSalidas(numero){
   const s = salidasRecientes.find(x => String(x.numero) === String(numero));
   if (!s) return;
-  if (!confirm('¿Reactivar a ' + numero + ' ' + (s.nombre || '') + '? Vuelve a estar activo, sin lote.')) return;
+  if (!(await confirmar('¿Reactivar a ' + numero + ' ' + (s.nombre || '') + '? Vuelve a estar activo, sin lote.', 'Reactivar'))) return;
 
   const datos = {numero, usuario: config.usuario, dispositivo: config.dispositivo};
   const aplicarLocal = () => {

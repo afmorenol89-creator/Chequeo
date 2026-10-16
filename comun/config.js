@@ -63,6 +63,50 @@ function pedirPinModal(aviso){
   });
 }
 
+/**
+ * Pregunta "¿seguro?" con un cuadro propio de la app, en lugar de confirm(): algunos navegadores
+ * (vistas web, navegadores integrados) bloquean los cuadros del sistema y confirm() responde
+ * "no" solo, sin mostrar nada, así que el botón parece no funcionar.
+ * Resuelve true si se toca `si`; false con Cancelar, tocando fuera o con Escape.
+ * `peligro`: el botón de aceptar va en rojo (para borrar o quitar).
+ */
+function confirmar(texto, si, peligro){
+  return new Promise(resolve => {
+    const fondo = document.createElement('div');
+    fondo.style.cssText = 'position:fixed;inset:0;z-index:200;background:rgba(22,33,26,.6);display:flex;' +
+      'align-items:center;justify-content:center;padding:20px';
+    const caja = document.createElement('div');
+    caja.setAttribute('role', 'alertdialog');
+    caja.style.cssText = 'background:#fff;border-radius:16px;padding:22px;width:100%;max-width:400px;' +
+      'font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#16211a';
+    const boton = 'flex:1;min-height:56px;border-radius:12px;font-weight:700;font-size:1rem;cursor:pointer;';
+    caja.innerHTML =
+      '<div data-r="texto" style="font-size:1.05rem;line-height:1.45;margin-bottom:18px"></div>' +
+      '<div style="display:flex;gap:10px">' +
+        '<button type="button" data-r="no" style="' + boton + 'background:#fff;color:#16211a;border:1px solid #d3dace">Cancelar</button>' +
+        '<button type="button" data-r="si" style="' + boton + 'border:none;color:#fff;background:' +
+          (peligro ? '#a3231c' : '#1f7a3d') + '"></button>' +
+      '</div>';
+    // el texto lleva números y nombres escritos por el usuario: va como texto, nunca como HTML
+    caja.querySelector('[data-r="texto"]').textContent = texto;
+    caja.querySelector('[data-r="si"]').textContent = si || 'Aceptar';
+    fondo.appendChild(caja);
+    document.body.appendChild(fondo);
+
+    const cerrar = r => {
+      document.removeEventListener('keydown', tecla);
+      fondo.remove();
+      resolve(r);
+    };
+    const tecla = e => { if (e.key === 'Escape') cerrar(false); };
+    document.addEventListener('keydown', tecla);
+    fondo.addEventListener('click', e => { if (e.target === fondo) cerrar(false); });
+    caja.querySelector('[data-r="no"]').addEventListener('click', () => cerrar(false));
+    caja.querySelector('[data-r="si"]').addEventListener('click', () => cerrar(true));
+    setTimeout(() => caja.querySelector('[data-r="si"]').focus(), 50);
+  });
+}
+
 let _pinEnCurso = null;
 
 /** Devuelve el PIN guardado o, si falta, lo pide y lo guarda. Nunca abre dos cuadros a la vez. */
